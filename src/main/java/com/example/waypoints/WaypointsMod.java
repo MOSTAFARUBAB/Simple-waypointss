@@ -66,6 +66,17 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile boolean showWaypointBeams = true;
     /** 0=normal, 1=thick, 2=extra thick. */
     public static volatile int beamThickness = 1;
+    /** Menu-only dimension browser: CURRENT, OVERWORLD, NETHER, END, or ALL. */
+    public static volatile int menuDimensionMode = 0;
+    /** Marker settings are adjustable from the waypoint menu. */
+    public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
+    public static volatile int markerColorMode = 0; // red, green, blue, yellow, purple, cyan, white
+    public static volatile int markerTextColorMode = 0; // white, yellow, aqua, green, pink
+
+    private static final int[] MARKER_COLORS = {0xFF2525, 0x35D04F, 0x3987FF, 0xFFD52A, 0xD95CFF, 0x29E6D2, 0xFFFFFF};
+    private static final String[] MARKER_COLOR_NAMES = {"Red", "Green", "Blue", "Yellow", "Purple", "Cyan", "White"};
+    private static final int[] MARKER_TEXT_COLORS = {0xFFFFFF, 0xFFFF55, 0x55FFFF, 0x55FF55, 0xFF55FF};
+    private static final String[] MARKER_TEXT_COLOR_NAMES = {"White", "Yellow", "Aqua", "Green", "Pink"};
 
     public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
     public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
@@ -213,15 +224,83 @@ public class WaypointsMod implements ClientModInitializer {
         return WAYPOINTS;
     }
 
-    /** Waypoints visible in the current save/server and current dimension. */
+    /** Waypoints for the active save/server and the player's actual current dimension. Used by world rendering. */
     public static List<Waypoint> currentContextWaypoints() {
+        return waypointsForDimension(currentDimension());
+    }
+
+    /** Menu list: lets the user browse dimensions without changing where the player currently is. */
+    public static List<Waypoint> menuWaypoints() {
         String worldId = currentWorldId();
-        String dimension = currentDimension();
+        migrateLegacyWorldIds(worldId);
+        String mode = menuDimensionId();
+        return WAYPOINTS.stream()
+                .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
+                .filter(w -> mode.equals("all") || java.util.Objects.equals(normalizeDimension(w.dimension()), mode))
+                .toList();
+    }
+
+    private static List<Waypoint> waypointsForDimension(String dimension) {
+        String worldId = currentWorldId();
+        migrateLegacyWorldIds(worldId);
         return WAYPOINTS.stream()
                 .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
                 .filter(w -> java.util.Objects.equals(normalizeDimension(w.dimension()), dimension))
                 .toList();
     }
+
+    /** Assigns pre-worldId saves to the first active save/server that opens the menu.
+     * Older files did not record ownership, so their original world cannot be reconstructed.
+     */
+    private static void migrateLegacyWorldIds(String activeWorldId) {
+        if (activeWorldId == null || activeWorldId.equals("unknown")) return;
+        boolean changed = false;
+        for (int i = 0; i < WAYPOINTS.size(); i++) {
+            Waypoint w = WAYPOINTS.get(i);
+            if (w.worldId() == null || w.worldId().isBlank() || w.worldId().equals("unknown")) {
+                WAYPOINTS.set(i, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(),
+                        normalizeDimension(w.dimension()), w.expiresAt(), activeWorldId));
+                changed = true;
+            }
+        }
+        if (changed) save();
+    }
+
+    public static String menuDimensionLabel() {
+        return switch (menuDimensionMode) {
+            case 1 -> "Overworld";
+            case 2 -> "Nether";
+            case 3 -> "End";
+            case 4 -> "All Dimensions";
+            default -> "Current: " + dimensionShortName(currentDimension());
+        };
+    }
+
+    public static void cycleMenuDimension() { menuDimensionMode = (menuDimensionMode + 1) % 5; }
+
+    private static String menuDimensionId() {
+        return switch (menuDimensionMode) {
+            case 1 -> "minecraft:overworld";
+            case 2 -> "minecraft:the_nether";
+            case 3 -> "minecraft:the_end";
+            case 4 -> "all";
+            default -> currentDimension();
+        };
+    }
+
+    private static String dimensionShortName(String id) {
+        if (id.endsWith(":overworld")) return "Overworld";
+        if (id.endsWith(":the_nether")) return "Nether";
+        if (id.endsWith(":the_end")) return "End";
+        return id;
+    }
+
+    public static String markerSizeLabel() { return switch (markerSizeMode) { case 0 -> "Small"; case 2 -> "Large"; default -> "Medium"; }; }
+    public static String markerColorLabel() { return MARKER_COLOR_NAMES[Math.floorMod(markerColorMode, MARKER_COLOR_NAMES.length)]; }
+    public static String markerTextColorLabel() { return MARKER_TEXT_COLOR_NAMES[Math.floorMod(markerTextColorMode, MARKER_TEXT_COLOR_NAMES.length)]; }
+    public static int markerRgb() { return MARKER_COLORS[Math.floorMod(markerColorMode, MARKER_COLORS.length)]; }
+    public static int markerTextRgb() { return MARKER_TEXT_COLORS[Math.floorMod(markerTextColorMode, MARKER_TEXT_COLORS.length)]; }
+
 
     /** Canonical dimension ID. Older saved files may contain ResourceKey[...] wrappers. */
     public static String normalizeDimension(String raw) {
@@ -245,7 +324,20 @@ public class WaypointsMod implements ClientModInitializer {
 
     public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.level != null ? normalizeDimension(mc.level.dimension().toString()) : "unknown";
+        if (mc.level == null) return "unknown";
+        // Prefer the dimension key's identifier where available; fall back to its string form for mapping compatibility.
+        try {
+            Object key = mc.level.dimension();
+            for (String methodName : new String[]{"identifier", "location"}) {
+                try {
+                    Object id = key.getClass().getMethod(methodName).invoke(key);
+                    if (id != null) return normalizeDimension(id.toString());
+                } catch (ReflectiveOperationException ignored) { }
+            }
+            return normalizeDimension(key.toString());
+        } catch (Throwable ignored) {
+            return normalizeDimension(mc.level.dimension().toString());
+        }
     }
 
     /** Pick the next free default name only within this save/server and dimension. */
@@ -565,7 +657,6 @@ public class WaypointsMod implements ClientModInitializer {
     // ---------------- Crisp waypoint marker ----------------
     // Draw the logo as simple GUI geometry and use Minecraft's normal text renderer.
     // Avoid matrix scaling here: scaling extracted GUI text can cause glyph clipping/jitter.
-    private static final int ICON_SIZE = 13;
     private static final int STRIP_COLOR = 0xB0000000;
 
     private static String formatDistance(double d) {
@@ -576,18 +667,18 @@ public class WaypointsMod implements ClientModInitializer {
     private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
         String distText = formatDistance(dist);
 
-        // Feather-style waypoint badge: red square with a custom pixel-art white W.
-        // Drawn as GUI rectangles rather than a font glyph, so it stays crisp at every scale.
-        int ix = cx - ICON_SIZE / 2;
-        int iy = cy - ICON_SIZE / 2;
-        int logoRed = 0xFFFF2525;
-        g.fill(ix - 1, iy - 1, ix + ICON_SIZE + 1, iy + ICON_SIZE + 1, 0xFF202020);
-        g.fill(ix, iy, ix + ICON_SIZE, iy + ICON_SIZE, logoRed);
-        // Five-by-five bitmap W, scaled with integer-sized blocks and centered in the badge.
+        // Feather-style logo: crisp red square with a pixel-art white W, similar to the reference.
+        // Integer pixel blocks avoid font glyph glitches and keep edges sharp at every size.
+        int pixel = switch (markerSizeMode) { case 0 -> 1; case 2 -> 3; default -> 2; };
+        int iconSize = 5 * pixel + 4;
+        int ix = cx - iconSize / 2;
+        int iy = cy - iconSize / 2;
+        int logoRed = 0xFF000000 | markerRgb();
+        g.fill(ix - 1, iy - 1, ix + iconSize + 1, iy + iconSize + 1, 0xFF202020);
+        g.fill(ix, iy, ix + iconSize, iy + iconSize, logoRed);
         final String[] wPixels = {"10001", "10001", "10101", "10101", "01010"};
-        int pixel = 2;
-        int logoLeft = ix + (ICON_SIZE - 5 * pixel) / 2;
-        int logoTop = iy + (ICON_SIZE - 5 * pixel) / 2;
+        int logoLeft = ix + (iconSize - 5 * pixel) / 2;
+        int logoTop = iy + (iconSize - 5 * pixel) / 2;
         for (int row = 0; row < wPixels.length; row++) {
             for (int col = 0; col < wPixels[row].length(); col++) {
                 if (wPixels[row].charAt(col) == '1') {
@@ -597,19 +688,17 @@ public class WaypointsMod implements ClientModInitializer {
             }
         }
 
-        // Keep the full name at native GUI scale for crisp text; opaque dark backing
-        // makes it readable over shaders, bright blocks, and the beam itself.
-        int nameTop = iy + ICON_SIZE + 2;
+        int nameTop = iy + iconSize + 2;
         int nameW = font.width(name);
         int nameH = 9;
         int nameLeft = cx - nameW / 2;
         g.fill(nameLeft - 3, nameTop - 1, nameLeft + nameW + 3, nameTop + nameH, STRIP_COLOR);
-        g.text(font, name, nameLeft, nameTop, 0xFFFFFFFF, true);
+        g.text(font, name, nameLeft, nameTop, 0xFF000000 | markerTextRgb(), true);
 
         int distTop = nameTop + nameH + 1;
         int distW = font.width(distText);
         g.fill(cx - distW / 2 - 4, distTop - 1, cx + distW / 2 + 4, distTop + 10, STRIP_COLOR);
-        g.text(font, distText, cx - distW / 2, distTop, 0xFFFFFFFF, true);
+        g.text(font, distText, cx - distW / 2, distTop, 0xFF000000 | markerTextRgb(), true);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */
