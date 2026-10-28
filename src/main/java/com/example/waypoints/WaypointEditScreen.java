@@ -141,7 +141,8 @@ public class WaypointEditScreen extends Screen {
 
         long expires = secs > 0 ? System.currentTimeMillis() + secs * 1000L : 0L;
         String dim = original != null ? original.dimension() : WaypointsMod.currentDimension();
-        WaypointsMod.upsert(original, new Waypoint(name, x, y, z, color, dim, expires));
+        WaypointsMod.upsert(original, new Waypoint(name, x, y, z, color, dim, expires,
+                original != null ? original.worldId() : WaypointsMod.currentWorldId()));
         back();
     }
 
@@ -161,7 +162,7 @@ public class WaypointEditScreen extends Screen {
         Integer c = WaypointsMod.parseColor(colorBox.getValue().trim());
         if (c != null) {
             int rgb = c == WaypointsMod.CHROMA
-                    ? WaypointsMod.resolveColor(new Waypoint("", 0, 0, 0, WaypointsMod.CHROMA, "", 0L))
+                    ? WaypointsMod.resolveColor(new Waypoint("", 0, 0, 0, WaypointsMod.CHROMA, "", 0L, ""))
                     : (c & 0xFFFFFF);
             graphics.fill(cx + 120, 104, cx + 140, 116, 0xFF000000 | rgb);
         }
