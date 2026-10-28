@@ -21,7 +21,6 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.core.BlockPos;
@@ -206,32 +205,9 @@ public class WaypointsMod implements ClientModInitializer {
         return WAYPOINTS;
     }
 
-    /**
-     * Identifies both the current save/server and dimension. Previously only the dimension
-     * was stored, so every world using minecraft:overworld shared the same waypoint list.
-     */
     public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return "unknown";
-
-        String worldKey;
-        try {
-            var integratedServer = mc.getSingleplayerServer();
-            if (integratedServer != null) {
-                // Absolute save path distinguishes two single-player worlds even if their names match.
-                worldKey = "singleplayer:" + integratedServer.getWorldPath(LevelResource.ROOT)
-                        .toAbsolutePath().normalize();
-            } else if (mc.getCurrentServer() != null && mc.getCurrentServer().ip != null) {
-                // Multiplayer waypoints are private to the server address.
-                worldKey = "server:" + mc.getCurrentServer().ip.trim().toLowerCase(java.util.Locale.ROOT);
-            } else {
-                worldKey = "session:unknown-server";
-            }
-        } catch (Throwable ignored) {
-            // Fallback still separates dimensions if an environment does not expose its save/server.
-            worldKey = "session:" + mc.level.dimension().toString();
-        }
-        return worldKey + "|" + mc.level.dimension();
+        return mc.level != null ? mc.level.dimension().toString() : "unknown";
     }
 
     static void add(String name, int x, int y, int z) {
