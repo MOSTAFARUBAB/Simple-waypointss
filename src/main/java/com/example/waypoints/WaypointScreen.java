@@ -123,15 +123,9 @@ public class WaypointScreen extends Screen {
             int rgb = WaypointsMod.resolveColor(w);
             graphics.fill(cx - 160, y + 2, cx - 150, y + 12, 0xFF000000 | rgb);
             graphics.text(this.font, w.name(), cx - 144, y + 1, 0xFFFFFFFF, true);
-            String dimName = w.dimension() == null ? "Unknown" : w.dimension().replace("minecraft:", "");
-            if (dimName.equals("the_nether")) dimName = "Nether";
-            else if (dimName.equals("the_end")) dimName = "End";
-            else if (dimName.equals("overworld")) dimName = "Overworld";
-            String info = "[" + dimName + "] " + w.x() + " " + w.y() + " " + w.z();
-            if (w.expiresAt() > 0) {
-                long left = Math.max(0, (w.expiresAt() - System.currentTimeMillis()) / 1000);
-                info += "  (" + left + "s left)";
-            }
+            // Keep waypoint details compact: show coordinates only.
+            // Dimension and expiry metadata are intentionally hidden from the list.
+            String info = w.x() + " " + w.y() + " " + w.z();
             graphics.text(this.font, info, cx - 144, y + 11, 0xFF999999, true);
             y += ROW_H;
         }
