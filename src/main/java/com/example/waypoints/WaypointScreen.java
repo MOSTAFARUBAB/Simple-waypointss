@@ -30,7 +30,7 @@ public class WaypointScreen extends Screen {
     }
 
     private int pages() {
-        int n = WaypointsMod.waypoints().size();
+        int n = WaypointsMod.worldWaypoints().size();
         return Math.max(1, (n + PER_PAGE - 1) / PER_PAGE);
     }
 
@@ -40,7 +40,7 @@ public class WaypointScreen extends Screen {
 
     @Override
     protected void init() {
-        List<Waypoint> all = WaypointsMod.waypoints();
+        List<Waypoint> all = WaypointsMod.worldWaypoints();
         final int p = currentPage();
         int start = p * PER_PAGE;
         int end = Math.min(all.size(), start + PER_PAGE);
@@ -87,7 +87,7 @@ public class WaypointScreen extends Screen {
         graphics.text(this.font, "Waypoints  (page " + (currentPage() + 1) + "/" + pages() + ")",
                 cx - 40, 34, 0xFFFFFFFF, true);
 
-        List<Waypoint> all = WaypointsMod.waypoints();
+        List<Waypoint> all = WaypointsMod.worldWaypoints();
         if (all.isEmpty()) {
             graphics.text(this.font, "No waypoints yet. Click \"+ New Waypoint\".",
                     cx - 160, TOP + 4, 0xFFAAAAAA, true);

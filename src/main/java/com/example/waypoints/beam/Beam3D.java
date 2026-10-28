@@ -37,11 +37,13 @@ import java.util.OptionalDouble;
  * the mod switches itself back to the on-screen beam.
  */
 public final class Beam3D {
-    private static final float BEAM_HEIGHT = 512f;
+    private static final float BEAM_HEIGHT = 320f;
+    private static final float BEAM_DOWN = 400f;
 
     private static final RenderPipeline PIPELINE = RenderPipelines.register(
             RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(WaypointsMod.MOD_ID, "pipeline/beam_depth_tested"))
+                    .withLocation(Identifier.fromNamespaceAndPath(WaypointsMod.MOD_ID, "pipeline/beam_through_walls"))
+                    .withDepthStencilState(Optional.empty())
                     .build());
 
     private static final Vector4f COLOR_MODULATOR = new Vector4f(1f, 1f, 1f, 1f);
@@ -79,10 +81,6 @@ public final class Beam3D {
                 return;
             }
             Vec3 eye = mc.player.getEyePosition();
-            double[] cam = WaypointsMod.cameraState(mc);
-            if (cam != null) eye = new Vec3(cam[0], cam[1], cam[2]);
-            double fovRad = Math.toRadians(mc.options.fov().get());
-            double screenH = Math.max(1, mc.getWindow().getHeight());
             String dim = WaypointsMod.currentDimension();
             List<BeamState> out = new ArrayList<>();
             for (Waypoint w : WaypointsMod.waypoints()) {
@@ -91,13 +89,12 @@ public final class Beam3D {
                 double dx = w.x() + 0.5 - eye.x;
                 double dz = w.z() + 0.5 - eye.z;
                 double horiz = Math.sqrt(dx * dx + dz * dz);
-                double fade = Math.max(0.0, Math.min(1.0, (horiz - 0.5) / 1.0));
+                double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
                 if (fade <= 0.02) continue;
 
-                // exact beacon size (inner beam radius 0.2, glow radius 0.25); only widened far away so it never becomes a hairline
-                double fromPixels = horiz * 2.0 * Math.tan(fovRad / 2.0) * (4.0 * 0.5) / screenH;
-                float core = (float) Math.max(0.2, fromPixels);
-                float glow = core * 1.25f;
+                // keep far beams visible: widen them a little with distance
+                float core = (float) Math.max(0.13, horiz * 0.004);
+                float glow = core * 2.4f;
 
                 int c = WaypointsMod.resolveColor(w);
                 float r = ((c >> 16) & 0xFF) / 255f;
@@ -133,34 +130,15 @@ public final class Beam3D {
 
             VertexConsumer builder = STAGED_BUFFER.getVertexBuilder(draw);
             Matrix4fc pose = matrices.last().pose();
-            // same animation clock as the vanilla beacon: 0..40 "ticks", spin = time * 2.25 - 45 degrees
-            float time = (System.currentTimeMillis() % 2000L) / 50f;
-            double spin = Math.toRadians(time * 2.25f - 45f);
             for (BeamState s : states) {
                 float x = (float) s.x();
                 float y = (float) s.y();
                 float z = (float) s.z();
-                float top = y + BEAM_HEIGHT;
-
-                // inner beam: a spinning diamond, fully solid
-                float rad = s.core();
-                for (int k = 0; k < 4; k++) {
-                    double a0 = spin + k * (Math.PI / 2.0);
-                    double a1 = a0 + Math.PI / 2.0;
-                    float x0 = x + (float) (Math.cos(a0) * rad);
-                    float z0 = z + (float) (Math.sin(a0) * rad);
-                    float x1 = x + (float) (Math.cos(a1) * rad);
-                    float z1 = z + (float) (Math.sin(a1) * rad);
-                    wall(pose, builder, x1, z1, x0, z0, y, top, s.r(), s.g(), s.b(), s.fade());
-                }
-
-                // outer glow: four faint walls (alpha 0.125 like the beacon)
-                float gr = s.glow();
-                float ga = 0.125f * s.fade();
-                wall(pose, builder, x - gr, z + gr, x + gr, z + gr, y, top, s.r(), s.g(), s.b(), ga);
-                wall(pose, builder, x + gr, z + gr, x + gr, z - gr, y, top, s.r(), s.g(), s.b(), ga);
-                wall(pose, builder, x + gr, z - gr, x - gr, z - gr, y, top, s.r(), s.g(), s.b(), ga);
-                wall(pose, builder, x - gr, z - gr, x - gr, z + gr, y, top, s.r(), s.g(), s.b(), ga);
+                // soft glow first, bright core on top
+                box(pose, builder, x - s.glow(), y - BEAM_DOWN, z - s.glow(), x + s.glow(), y + BEAM_HEIGHT, z + s.glow(),
+                        s.r(), s.g(), s.b(), 0.15f * s.fade());
+                box(pose, builder, x - s.core(), y - BEAM_DOWN, z - s.core(), x + s.core(), y + BEAM_HEIGHT, z + s.core(),
+                        s.r(), s.g(), s.b(), 1.0f * s.fade());
             }
 
             matrices.popPose();
@@ -176,14 +154,40 @@ public final class Beam3D {
         }
     }
 
-    /** One vertical wall from (x1,z1) to (x2,z2), seen from the outside when the corners run in this order. */
-    private static void wall(Matrix4fc m, VertexConsumer buf,
-                             float x1, float z1, float x2, float z2, float y0, float y1,
-                             float r, float g, float b, float a) {
-        buf.addVertex(m, x1, y0, z1).setColor(r, g, b, a);
-        buf.addVertex(m, x2, y0, z2).setColor(r, g, b, a);
-        buf.addVertex(m, x2, y1, z2).setColor(r, g, b, a);
-        buf.addVertex(m, x1, y1, z1).setColor(r, g, b, a);
+    private static void box(Matrix4fc m, VertexConsumer buf,
+                            float minX, float minY, float minZ,
+                            float maxX, float maxY, float maxZ,
+                            float r, float g, float b, float a) {
+        // Front
+        buf.addVertex(m, minX, minY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, minY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, maxY, maxZ).setColor(r, g, b, a);
+        // Back
+        buf.addVertex(m, maxX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, maxY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, minZ).setColor(r, g, b, a);
+        // Left
+        buf.addVertex(m, minX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, minY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, maxY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, maxY, minZ).setColor(r, g, b, a);
+        // Right
+        buf.addVertex(m, maxX, minY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, maxZ).setColor(r, g, b, a);
+        // Top
+        buf.addVertex(m, minX, maxY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, maxY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, maxY, minZ).setColor(r, g, b, a);
+        // Bottom
+        buf.addVertex(m, minX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, minY, minZ).setColor(r, g, b, a);
+        buf.addVertex(m, maxX, minY, maxZ).setColor(r, g, b, a);
+        buf.addVertex(m, minX, minY, maxZ).setColor(r, g, b, a);
     }
 
     private static void drawBuffer(Minecraft client, StagedVertexBuffer.ExecuteInfo info, RenderPipeline pipeline) {

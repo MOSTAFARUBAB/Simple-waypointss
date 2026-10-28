@@ -1,6 +1,6 @@
 # Simple Waypoints (Fabric, Minecraft 26.3, client-side)
 
-Feather-style waypoints: colored letter icon, small name and distance (one decimal) shown through walls, plus a Minecraft-beacon-style beam: spinning solid inner beam + faint glow, hidden by blocks (3d-beam jar).
+Colored waypoint labels (name + distance) shown through walls. A solid beam and a label (name + distance) are drawn on screen at each waypoint.
 
 Controls
 - B (rebind in Controls) -> drop a waypoint at your position

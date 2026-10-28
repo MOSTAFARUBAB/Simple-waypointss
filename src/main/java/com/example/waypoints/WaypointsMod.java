@@ -21,7 +21,6 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.core.BlockPos;
@@ -63,7 +62,6 @@ public class WaypointsMod implements ClientModInitializer {
     /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
     public static volatile boolean beam3dActive = false;
 
-
     @Override
     public void onInitializeClient() {
         load();
@@ -80,6 +78,7 @@ public class WaypointsMod implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             purgeExpired();
+            adoptLegacy();
             while (addKey.consumeClick()) {
                 if (client.player == null) return;
                 addHere();
@@ -104,7 +103,7 @@ public class WaypointsMod implements ClientModInitializer {
 
     // ---------------- commands ----------------
     private static CompletableFuture<Suggestions> suggestNames(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder b) {
-        for (Waypoint w : WAYPOINTS) b.suggest(w.name());
+        for (Waypoint w : worldWaypoints()) b.suggest(w.name());
         return b.buildFuture();
     }
 
@@ -145,7 +144,7 @@ public class WaypointsMod implements ClientModInitializer {
                                         .suggests(WaypointsMod::suggestNames)
                                         .executes(ctx -> {
                                             String n = StringArgumentType.getString(ctx, "name");
-                                            boolean removed = WAYPOINTS.removeIf(w -> w.name().equalsIgnoreCase(n));
+                                            boolean removed = WAYPOINTS.removeIf(w -> inCurrentWorld(w) && w.name().equalsIgnoreCase(n));
                                             save();
                                             feedback(ctx.getSource(), removed ? "Removed." : "No waypoint with that name.");
                                             return 1;
@@ -180,8 +179,9 @@ public class WaypointsMod implements ClientModInitializer {
                                                 }))))
                         .then(ClientCommands.literal("list")
                                 .executes(ctx -> {
-                                    if (WAYPOINTS.isEmpty()) feedback(ctx.getSource(), "No waypoints.");
-                                    for (Waypoint w : WAYPOINTS) {
+                                    List<Waypoint> here = worldWaypoints();
+                                    if (here.isEmpty()) feedback(ctx.getSource(), "No waypoints.");
+                                    for (Waypoint w : here) {
                                         String extra = w.color() == CHROMA ? " chroma" : String.format(" #%06X", w.color() & 0xFFFFFF);
                                         if (w.expiresAt() > 0) extra += " (" + Math.max(0, (w.expiresAt() - System.currentTimeMillis()) / 1000) + "s left)";
                                         feedback(ctx.getSource(), w.name() + "  " + w.x() + " " + w.y() + " " + w.z() + extra);
@@ -190,7 +190,7 @@ public class WaypointsMod implements ClientModInitializer {
                                 }))
                         .then(ClientCommands.literal("clear")
                                 .executes(ctx -> {
-                                    WAYPOINTS.clear();
+                                    WAYPOINTS.removeIf(WaypointsMod::inCurrentWorld);
                                     save();
                                     feedback(ctx.getSource(), "All waypoints cleared.");
                                     return 1;
@@ -207,31 +207,97 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     /**
-     * Identifies both the current save/server and dimension. Previously only the dimension
-     * was stored, so every world using minecraft:overworld shared the same waypoint list.
+     * Identifies the world/server you are in: the world's name in singleplayer, the server address in multiplayer.
+     * Uses reflection so a name change in a future Minecraft version can never break the build;
+     * if it can't be read, all worlds share one list (the old behaviour).
      */
-    public static String currentDimension() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return "unknown";
+    private static Object cachedLevel = null;
+    private static String cachedWorldKey = "unknown";
 
-        String worldKey;
+    private static Object callMethod(Object target, String name) {
         try {
-            var integratedServer = mc.getSingleplayerServer();
-            if (integratedServer != null) {
-                // Absolute save path distinguishes two single-player worlds even if their names match.
-                worldKey = "singleplayer:" + integratedServer.getWorldPath(LevelResource.ROOT)
-                        .toAbsolutePath().normalize();
-            } else if (mc.getCurrentServer() != null && mc.getCurrentServer().ip != null) {
-                // Multiplayer waypoints are private to the server address.
-                worldKey = "server:" + mc.getCurrentServer().ip.trim().toLowerCase(java.util.Locale.ROOT);
+            java.lang.reflect.Method m = target.getClass().getMethod(name);
+            m.setAccessible(true);
+            return m.invoke(target);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Object readField(Object target, String name) {
+        try {
+            java.lang.reflect.Field f = target.getClass().getField(name);
+            f.setAccessible(true);
+            return f.get(target);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    static String worldKey() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return cachedWorldKey;
+        if (mc.level == cachedLevel) return cachedWorldKey;
+
+        String key = "unknown";
+        try {
+            Object singleplayer = callMethod(mc, "getSingleplayerServer");
+            if (singleplayer != null) {
+                Object worldData = callMethod(singleplayer, "getWorldData");
+                Object levelName = worldData != null ? callMethod(worldData, "getLevelName") : null;
+                if (levelName != null) key = "world:" + levelName;
             } else {
-                worldKey = "session:unknown-server";
+                Object server = callMethod(mc, "getCurrentServer");
+                if (server != null) {
+                    Object ip = readField(server, "ip");
+                    if (ip == null) ip = callMethod(server, "ip");
+                    if (ip != null) key = "server:" + ip;
+                }
             }
         } catch (Throwable ignored) {
-            // Fallback still separates dimensions if an environment does not expose its save/server.
-            worldKey = "session:" + mc.level.dimension().toString();
         }
-        return worldKey + "|" + mc.level.dimension();
+        cachedLevel = mc.level;
+        cachedWorldKey = key;
+        return key;
+    }
+
+    /** Stored in each waypoint as "<world>|<dimension>" so every world keeps its own waypoints. */
+    public static String currentDimension() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return "unknown|unknown";
+        return worldKey() + "|" + mc.level.dimension().toString();
+    }
+
+    static boolean inCurrentWorld(Waypoint w) {
+        return w.dimension().startsWith(worldKey() + "|");
+    }
+
+    /** Only the waypoints that belong to the world/server you are in (all of its dimensions). */
+    public static List<Waypoint> worldWaypoints() {
+        List<Waypoint> out = new ArrayList<>();
+        for (Waypoint w : WAYPOINTS) {
+            if (inCurrentWorld(w)) out.add(w);
+        }
+        return out;
+    }
+
+    /**
+     * Waypoints saved before worlds were tracked have no world in them. The first world you join after
+     * updating adopts them (once), so nothing is lost.
+     */
+    private static void adoptLegacy() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) return;
+        String prefix = worldKey() + "|";
+        boolean changed = false;
+        for (int i = 0; i < WAYPOINTS.size(); i++) {
+            Waypoint w = WAYPOINTS.get(i);
+            if (!w.dimension().contains("|")) {
+                WAYPOINTS.set(i, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), prefix + w.dimension(), w.expiresAt()));
+                changed = true;
+            }
+        }
+        if (changed) save();
     }
 
     static void add(String name, int x, int y, int z) {
@@ -244,7 +310,7 @@ public class WaypointsMod implements ClientModInitializer {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         BlockPos p = mc.player.blockPosition();
-        add("Waypoint" + (WAYPOINTS.size() + 1), p.getX(), p.getY(), p.getZ());
+        add("Waypoint" + (worldWaypoints().size() + 1), p.getX(), p.getY(), p.getZ());
     }
 
     static void remove(Waypoint w) {
@@ -304,7 +370,7 @@ public class WaypointsMod implements ClientModInitializer {
         boolean found = false;
         for (int i = 0; i < WAYPOINTS.size(); i++) {
             Waypoint w = WAYPOINTS.get(i);
-            if (w.name().equalsIgnoreCase(name)) {
+            if (inCurrentWorld(w) && w.name().equalsIgnoreCase(name)) {
                 WAYPOINTS.set(i, fn.apply(w));
                 found = true;
             }
@@ -380,27 +446,18 @@ public class WaypointsMod implements ClientModInitializer {
 
     // ---------------- HUD rendering (beam + label) ----------------
     private static final double BEAM_HEIGHT = 320.0;
-    private static final double CORE_HALF_WIDTH_BLOCKS = 0.22;
-    private static final double GLOW_HALF_WIDTH_BLOCKS = 0.6;
+    private static final double BEAM_DOWN = 400.0;
+    private static final double CORE_HALF_WIDTH_BLOCKS = 0.16;
+    private static final double GLOW_HALF_WIDTH_BLOCKS = 0.38;
 
     private static void renderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || WAYPOINTS.isEmpty()) return;
 
         float partial = deltaTracker.getGameTimeDeltaPartialTick(false);
-        Vec3 playerEye = mc.player.getEyePosition(partial);
-        Vec3 eye = playerEye;
-        double yawDeg = mc.player.getViewYRot(partial);
-        double pitchDeg = mc.player.getViewXRot(partial);
-        // Use the real render camera when we can (Freecam, F5 and similar), so the label lines up with the beam.
-        double[] cam = cameraState(mc);
-        if (cam != null) {
-            eye = new Vec3(cam[0], cam[1], cam[2]);
-            yawDeg = cam[3];
-            pitchDeg = cam[4];
-        }
-        double yaw = Math.toRadians(yawDeg);
-        double pitch = Math.toRadians(pitchDeg);
+        Vec3 eye = mc.player.getEyePosition(partial);
+        double yaw = Math.toRadians(mc.player.getViewYRot(partial));
+        double pitch = Math.toRadians(mc.player.getViewXRot(partial));
 
         // Camera basis vectors (Minecraft: yaw 0 looks toward +Z).
         double fx = -Math.sin(yaw) * Math.cos(pitch);
@@ -439,160 +496,24 @@ public class WaypointsMod implements ClientModInitializer {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
-            // Feather-style marker: colored letter icon, small name, distance with one decimal
+            // label near the base of the beam
             double dx = bx;
-            double dy = by + 1.5;
+            double dy = by + 1.2;
             double dz = bz;
             double[] p = project(dx, dy, dz, f, r, u, sw, sh, tanHalfFov, aspect);
             if (p == null) continue;
             int sx = (int) p[0];
             int sy = (int) p[1];
-            if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
+            if (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) continue;
 
-            // distance is measured from the player, not from the camera
-            double pdx = w.x() + 0.5 - playerEye.x;
-            double pdy = w.y() + 0.5 - playerEye.y;
-            double pdz = w.z() + 0.5 - playerEye.z;
-            double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
-            drawMarker(graphics, font, w.name(), dist, rgb, sx, sy);
+            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            String text = w.name() + " (" + (int) dist + "m)";
+            int tw = font.width(text);
+            int x0 = sx - tw / 2;
+            int y0 = sy - 4;
+            graphics.fill(x0 - 2, y0 - 2, x0 + tw + 2, y0 + 10, 0x90000000);
+            graphics.text(font, text, x0, y0, 0xFFFFFFFF, false);
         }
-    }
-
-    // ---------------- real camera lookup (reflection, falls back to the player's view) ----------------
-    private static java.lang.reflect.Method CAM_GET, CAM_POS, CAM_YROT, CAM_XROT;
-    private static boolean camBroken = false;
-
-    private static java.lang.reflect.Method findMethod(Class<?> c, String... names) {
-        for (String n : names) {
-            try {
-                return c.getMethod(n);
-            } catch (NoSuchMethodException ignored) {
-            }
-        }
-        return null;
-    }
-
-    /** Returns {x, y, z, yawDegrees, pitchDegrees} of the camera that is actually used to draw the world, or null. */
-    public static double[] cameraState(Minecraft mc) {
-        if (camBroken) return null;
-        try {
-            Object gr = mc.gameRenderer;
-            if (CAM_GET == null) {
-                CAM_GET = findMethod(gr.getClass(), "getMainCamera", "mainCamera");
-                if (CAM_GET == null) {
-                    camBroken = true;
-                    return null;
-                }
-            }
-            Object cam = CAM_GET.invoke(gr);
-            if (cam == null) return null;
-            if (CAM_POS == null) {
-                CAM_POS = findMethod(cam.getClass(), "position", "getPosition");
-                CAM_YROT = findMethod(cam.getClass(), "yRot", "getYRot");
-                CAM_XROT = findMethod(cam.getClass(), "xRot", "getXRot");
-                if (CAM_POS == null || CAM_YROT == null || CAM_XROT == null) {
-                    camBroken = true;
-                    return null;
-                }
-            }
-            Vec3 pos = (Vec3) CAM_POS.invoke(cam);
-            float yRot = ((Number) CAM_YROT.invoke(cam)).floatValue();
-            float xRot = ((Number) CAM_XROT.invoke(cam)).floatValue();
-            if (pos == null) return null;
-            return new double[]{pos.x, pos.y, pos.z, yRot, xRot};
-        } catch (Throwable t) {
-            camBroken = true;
-            return null;
-        }
-    }
-
-    // ---------------- Feather-style marker ----------------
-    private static final int ICON_SIZE = 11;
-    private static final int STRIP_COLOR = 0x90000000;
-
-    private static java.lang.reflect.Method M_POSE, M_PUSH, M_POP, M_TRANSLATE, M_SCALE;
-    private static boolean scaleChecked = false;
-    private static boolean scaleOk = false;
-
-    /** Text scaling uses the GUI pose stack, looked up by reflection. If that is not available, text just stays full size. */
-    private static void initScale(GuiGraphicsExtractor g) {
-        scaleChecked = true;
-        try {
-            M_POSE = g.getClass().getMethod("pose");
-            Object pose = M_POSE.invoke(g);
-            Class<?> pc = pose.getClass();
-            M_PUSH = pc.getMethod("pushMatrix");
-            M_POP = pc.getMethod("popMatrix");
-            M_TRANSLATE = pc.getMethod("translate", float.class, float.class);
-            M_SCALE = pc.getMethod("scale", float.class, float.class);
-            scaleOk = true;
-        } catch (Throwable t) {
-            scaleOk = false;
-        }
-    }
-
-    private static void drawCenteredText(GuiGraphicsExtractor g, Font font, String text, int cx, int top, float scale, int color) {
-        int w = font.width(text);
-        if (!scaleOk || scale == 1f) {
-            g.text(font, text, cx - w / 2, top, color, true);
-            return;
-        }
-        Object pose = null;
-        boolean pushed = false;
-        try {
-            pose = M_POSE.invoke(g);
-            M_PUSH.invoke(pose);
-            pushed = true;
-            M_TRANSLATE.invoke(pose, (float) cx, (float) top);
-            M_SCALE.invoke(pose, scale, scale);
-            g.text(font, text, -w / 2, 0, color, true);
-        } catch (Throwable t) {
-            scaleOk = false;
-        } finally {
-            if (pushed) {
-                try {
-                    M_POP.invoke(pose);
-                } catch (Throwable ignored) {
-                    scaleOk = false;
-                }
-            }
-        }
-    }
-
-    private static String formatDistance(double d) {
-        if (d < 1000.0) return String.format(java.util.Locale.ROOT, "%.1fm", d);
-        return (int) d + "m";
-    }
-
-    private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
-        if (!scaleChecked) initScale(g);
-
-        float nameScale = scaleOk ? 0.6f : 1f;
-        String distText = formatDistance(dist);
-        String letter = name.isEmpty() ? "W" : new String(Character.toChars(Character.toUpperCase(name.codePointAt(0))));
-
-        // --- icon: rounded colored square with the first letter ---
-        int ix = cx - ICON_SIZE / 2;
-        int iy = cy - ICON_SIZE / 2;
-        int fillColor = 0xFF000000 | rgb;
-        g.fill(ix + 1, iy, ix + ICON_SIZE - 1, iy + ICON_SIZE, fillColor);
-        g.fill(ix, iy + 1, ix + ICON_SIZE, iy + ICON_SIZE - 1, fillColor);
-        int lum = (((rgb >> 16) & 0xFF) * 299 + ((rgb >> 8) & 0xFF) * 587 + (rgb & 0xFF) * 114) / 1000;
-        int letterColor = lum > 170 ? 0xFF101010 : 0xFFFFFFFF;
-        g.text(font, letter, cx - font.width(letter) / 2, iy + 2, letterColor, false);
-
-        // --- name: small text on a dark strip ---
-        int nameTop = iy + ICON_SIZE + 1;
-        int nameW = (int) Math.ceil(font.width(name) * nameScale);
-        int nameH = (int) Math.ceil(9 * nameScale);
-        g.fill(cx - nameW / 2 - 2, nameTop, cx - nameW / 2 + nameW + 2, nameTop + nameH + 2, STRIP_COLOR);
-        drawCenteredText(g, font, name, cx, nameTop + 1, nameScale, 0xFFFFFFFF);
-
-        // --- distance: normal-size text on a dark strip ---
-        int distTop = nameTop + nameH + 2;
-        int distW = font.width(distText);
-        g.fill(cx - distW / 2 - 3, distTop, cx - distW / 2 + distW + 3, distTop + 11, STRIP_COLOR);
-        g.text(font, distText, cx - distW / 2, distTop + 1, 0xFFFFFFFF, true);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */
@@ -616,8 +537,10 @@ public class WaypointsMod implements ClientModInitializer {
                                  double[] f, double[] r, double[] u, int sw, int sh,
                                  double tanHalfFov, double aspect, int rgb, double fade) {
         double near = 0.1;
-        double d0 = bx * f[0] + by * f[1] + bz * f[2];
-        double d1 = d0 + BEAM_HEIGHT * f[1];
+        double startY = by - BEAM_DOWN;
+        double totalLen = BEAM_DOWN + BEAM_HEIGHT;
+        double d0 = bx * f[0] + startY * f[1] + bz * f[2];
+        double d1 = d0 + totalLen * f[1];
         if (d0 < near && d1 < near) return;
 
         double t0 = 0.0;
@@ -625,8 +548,8 @@ public class WaypointsMod implements ClientModInitializer {
         if (d0 < near) t0 = (near - d0) / (d1 - d0);
         else if (d1 < near) t1 = (near - d0) / (d1 - d0);
 
-        double[] a = project(bx, by + t0 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
-        double[] b = project(bx, by + t1 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        double[] a = project(bx, startY + t0 * totalLen, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        double[] b = project(bx, startY + t1 * totalLen, bz, f, r, u, sw, sh, tanHalfFov, aspect);
         if (a == null || b == null) return;
 
         double pxPerInvDepth = (sh / 2.0) / tanHalfFov;
@@ -636,7 +559,7 @@ public class WaypointsMod implements ClientModInitializer {
         double yB = b[1];
 
         if (Math.abs(yB - yA) < 1.0) {
-            double hw = Math.max(3.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
+            double hw = Math.max(2.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
             int cx = (int) a[0];
             int cy = (int) yA;
             g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(1.0 * fade, rgb));
@@ -645,24 +568,22 @@ public class WaypointsMod implements ClientModInitializer {
 
         int rowStart = (int) Math.max(0, Math.floor(Math.min(yA, yB)));
         int rowEnd = (int) Math.min(sh, Math.ceil(Math.max(yA, yB)));
-        final int step = 3;
-        for (int sy = rowStart; sy < rowEnd; sy += step) {
-            double frac = (sy + step / 2.0 - yA) / (yB - yA);
+        for (int sy = rowStart; sy < rowEnd; sy++) {
+            double frac = (sy - yA) / (yB - yA);
             if (frac < 0.0 || frac > 1.0) continue;
             double sx = a[0] + frac * (b[0] - a[0]);
             double inv = invA + frac * (invB - invA);
 
             // soft glow first, bright core on top
-            double bw = 1.0;
-            double coreHalf = Math.max(3.0 * bw, CORE_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
-            double glowHalf = Math.max(7.0 * bw, GLOW_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
-            drawRowSpan(g, sx, sy, step, glowHalf, 0.18 * fade, rgb, sw);
-            drawRowSpan(g, sx, sy, step, coreHalf, 1.0 * fade, rgb, sw);
+            double glowHalf = Math.max(2.5, GLOW_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
+            double coreHalf = Math.max(1.4, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
+            drawRowSpan(g, sx, sy, glowHalf, 0.18 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, coreHalf, 1.0 * fade, rgb, sw);
         }
     }
 
     /** One horizontal slice of the beam with smooth (anti-aliased) left and right edges. */
-    private static void drawRowSpan(GuiGraphicsExtractor g, double centerX, int sy, int rows, double halfWidth,
+    private static void drawRowSpan(GuiGraphicsExtractor g, double centerX, int sy, double halfWidth,
                                     double alpha, int rgb, int sw) {
         double left = centerX - halfWidth;
         double right = centerX + halfWidth;
@@ -671,16 +592,16 @@ public class WaypointsMod implements ClientModInitializer {
         int li = (int) Math.ceil(left);
         int ri = (int) Math.floor(right);
         if (ri > li) {
-            g.fill(li, sy, ri, sy + rows, argb(alpha, rgb));
+            g.fill(li, sy, ri, sy + 1, argb(alpha, rgb));
         }
         double leftCover = li - left;   // part of the pixel left of the span that is covered
         if (leftCover > 0.02) {
-            g.fill(li - 1, sy, li, sy + rows, argb(alpha * Math.min(1.0, leftCover), rgb));
+            g.fill(li - 1, sy, li, sy + 1, argb(alpha * Math.min(1.0, leftCover), rgb));
         }
         double rightCover = right - Math.max(ri, li);
         if (rightCover > 0.02) {
             int rx = Math.max(ri, li);
-            g.fill(rx, sy, rx + 1, sy + rows, argb(alpha * Math.min(1.0, rightCover), rgb));
+            g.fill(rx, sy, rx + 1, sy + 1, argb(alpha * Math.min(1.0, rightCover), rgb));
         }
     }
 
