@@ -63,8 +63,6 @@ public class WaypointsMod implements ClientModInitializer {
     /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
     public static volatile boolean beam3dActive = false;
 
-    /** When true the beam is drawn on screen (stable, never vanishes) even if the 3D beam is available. /wp beam screen|world */
-    public static volatile boolean hudBeamForced = false;
 
     /** Beam width multiplier (1.0 = default, about 7 pixels on screen at any distance). /wp beam width <0.4-5> */
     public static volatile float beamWidth = 1.0f;
@@ -82,7 +80,6 @@ public class WaypointsMod implements ClientModInitializer {
                 try (var in = Files.newInputStream(SETTINGS_FILE)) {
                     pr.load(in);
                 }
-                hudBeamForced = Boolean.parseBoolean(pr.getProperty("screenBeam", "false"));
                 beamWidth = Math.max(0.4f, Math.min(5f, Float.parseFloat(pr.getProperty("beamWidth", "1.0"))));
             }
         } catch (Exception e) {
@@ -93,7 +90,6 @@ public class WaypointsMod implements ClientModInitializer {
     private static void saveSettings() {
         try {
             java.util.Properties pr = new java.util.Properties();
-            pr.setProperty("screenBeam", Boolean.toString(hudBeamForced));
             pr.setProperty("beamWidth", Float.toString(beamWidth));
             try (var out = Files.newOutputStream(SETTINGS_FILE)) {
                 pr.store(out, "Simple Waypoints settings");
@@ -219,12 +215,6 @@ public class WaypointsMod implements ClientModInitializer {
                                                     return 1;
                                                 }))))
                         .then(ClientCommands.literal("beam")
-                                .then(ClientCommands.literal("screen")
-                                        .executes(ctx -> {
-                                            setScreenBeam(true);
-                                            feedback(ctx.getSource(), "Beam is now drawn on screen (stable).");
-                                            return 1;
-                                        }))
                                 .then(ClientCommands.literal("width")
                                         .then(ClientCommands.argument("value", FloatArgumentType.floatArg(0.4f, 5.0f))
                                                 .executes(ctx -> {
@@ -232,13 +222,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                     saveSettings();
                                                     feedback(ctx.getSource(), "Beam width set to " + beamWidth + " (1.0 = default, bigger = thicker).");
                                                     return 1;
-                                                })))
-                                .then(ClientCommands.literal("world")
-                                        .executes(ctx -> {
-                                            setScreenBeam(false);
-                                            feedback(ctx.getSource(), beam3dActive ? "Beam is now drawn in the world (3D)." : "The 3D beam is not available in this jar, so the on-screen beam stays.");
-                                            return 1;
-                                        })))
+                                                }))))
                         .then(ClientCommands.literal("list")
                                 .executes(ctx -> {
                                     if (WAYPOINTS.isEmpty()) feedback(ctx.getSource(), "No waypoints.");
@@ -256,11 +240,6 @@ public class WaypointsMod implements ClientModInitializer {
                                     feedback(ctx.getSource(), "All waypoints cleared.");
                                     return 1;
                                 }))));
-    }
-
-    private static void setScreenBeam(boolean on) {
-        hudBeamForced = on;
-        saveSettings();
     }
 
     private static void feedback(FabricClientCommandSource source, String message) {
@@ -478,7 +457,7 @@ public class WaypointsMod implements ClientModInitializer {
 
             // beam: fades out smoothly as you get close, so it never pops on/off
             double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
-            if ((!beam3dActive || hudBeamForced) && fade > 0.02) {
+            if (!beam3dActive && fade > 0.02) {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
@@ -688,8 +667,9 @@ public class WaypointsMod implements ClientModInitializer {
 
         int rowStart = (int) Math.max(0, Math.floor(Math.min(yA, yB)));
         int rowEnd = (int) Math.min(sh, Math.ceil(Math.max(yA, yB)));
-        for (int sy = rowStart; sy < rowEnd; sy++) {
-            double frac = (sy - yA) / (yB - yA);
+        final int step = 3;
+        for (int sy = rowStart; sy < rowEnd; sy += step) {
+            double frac = (sy + step / 2.0 - yA) / (yB - yA);
             if (frac < 0.0 || frac > 1.0) continue;
             double sx = a[0] + frac * (b[0] - a[0]);
             double inv = invA + frac * (invB - invA);
@@ -697,16 +677,14 @@ public class WaypointsMod implements ClientModInitializer {
             // soft glow first, bright core on top
             double bw = beamWidth;
             double coreHalf = Math.max(3.0 * bw, CORE_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
-            double midHalf = coreHalf * 1.8;
             double glowHalf = Math.max(7.0 * bw, GLOW_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
-            drawRowSpan(g, sx, sy, glowHalf, 0.14 * fade, rgb, sw);
-            drawRowSpan(g, sx, sy, midHalf, 0.32 * fade, rgb, sw);
-            drawRowSpan(g, sx, sy, coreHalf, 1.0 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, step, glowHalf, 0.18 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, step, coreHalf, 1.0 * fade, rgb, sw);
         }
     }
 
     /** One horizontal slice of the beam with smooth (anti-aliased) left and right edges. */
-    private static void drawRowSpan(GuiGraphicsExtractor g, double centerX, int sy, double halfWidth,
+    private static void drawRowSpan(GuiGraphicsExtractor g, double centerX, int sy, int rows, double halfWidth,
                                     double alpha, int rgb, int sw) {
         double left = centerX - halfWidth;
         double right = centerX + halfWidth;
@@ -715,16 +693,16 @@ public class WaypointsMod implements ClientModInitializer {
         int li = (int) Math.ceil(left);
         int ri = (int) Math.floor(right);
         if (ri > li) {
-            g.fill(li, sy, ri, sy + 1, argb(alpha, rgb));
+            g.fill(li, sy, ri, sy + rows, argb(alpha, rgb));
         }
         double leftCover = li - left;   // part of the pixel left of the span that is covered
         if (leftCover > 0.02) {
-            g.fill(li - 1, sy, li, sy + 1, argb(alpha * Math.min(1.0, leftCover), rgb));
+            g.fill(li - 1, sy, li, sy + rows, argb(alpha * Math.min(1.0, leftCover), rgb));
         }
         double rightCover = right - Math.max(ri, li);
         if (rightCover > 0.02) {
             int rx = Math.max(ri, li);
-            g.fill(rx, sy, rx + 1, sy + 1, argb(alpha * Math.min(1.0, rightCover), rgb));
+            g.fill(rx, sy, rx + 1, sy + rows, argb(alpha * Math.min(1.0, rightCover), rgb));
         }
     }
 

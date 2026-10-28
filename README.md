@@ -1,6 +1,6 @@
 # Simple Waypoints (Fabric, Minecraft 26.3, client-side)
 
-Feather-style waypoints: colored letter icon, small name and distance (one decimal) shown through walls, plus a beam.
+Feather-style waypoints: colored letter icon, small name and distance (one decimal) shown through walls, plus a beam that blocks hide (3d-beam jar).
 
 Controls
 - B (rebind in Controls) -> drop a waypoint at your position
@@ -10,8 +10,6 @@ Controls
 - /wp remove <name>
 - /wp color <name> <color>   (red green blue yellow pink cyan orange white, hex like ff8800, or chroma = rainbow)
 - /wp expire <name> <seconds> (0 = permanent)
-- /wp beam screen   (beam drawn on screen: never vanishes)
-- /wp beam world    (real 3D beam, only in the 3d-beam jar)
 - /wp beam width <0.4-5>  (1.0 = default, bigger = thicker beam; saved)
 - /wp list
 - /wp clear

@@ -41,8 +41,7 @@ public final class Beam3D {
 
     private static final RenderPipeline PIPELINE = RenderPipelines.register(
             RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(WaypointsMod.MOD_ID, "pipeline/beam_through_walls"))
-                    .withDepthStencilState(Optional.empty())
+                    .withLocation(Identifier.fromNamespaceAndPath(WaypointsMod.MOD_ID, "pipeline/beam_depth_tested"))
                     .build());
 
     private static final Vector4f COLOR_MODULATOR = new Vector4f(1f, 1f, 1f, 1f);
@@ -73,10 +72,6 @@ public final class Beam3D {
     // ---- extraction phase ----
     private static void extract(LevelExtractionContext context) {
         if (failed) return;
-        if (WaypointsMod.hudBeamForced) {
-            beams = List.of();
-            return;
-        }
         try {
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) {
@@ -96,13 +91,13 @@ public final class Beam3D {
                 double dx = w.x() + 0.5 - eye.x;
                 double dz = w.z() + 0.5 - eye.z;
                 double horiz = Math.sqrt(dx * dx + dz * dz);
-                double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
+                double fade = Math.max(0.0, Math.min(1.0, (horiz - 0.5) / 1.0));
                 if (fade <= 0.02) continue;
 
                 // keep the beam about the same thickness on screen at any distance (no thin shimmering line)
                 double fromPixels = horiz * 2.0 * Math.tan(fovRad / 2.0) * (WaypointsMod.beamPixels() * 0.5) / screenH;
                 float core = (float) Math.max(0.22 * WaypointsMod.beamWidth, fromPixels);
-                float glow = core * 3.2f;
+                float glow = core;
 
                 int c = WaypointsMod.resolveColor(w);
                 float r = ((c >> 16) & 0xFF) / 255f;
@@ -142,14 +137,9 @@ public final class Beam3D {
                 float x = (float) s.x();
                 float y = (float) s.y();
                 float z = (float) s.z();
-                // outer glow, middle layer, then the bright core on top (all drawn through blocks)
-                float mid = s.core() * 1.8f;
-                box(pose, builder, x - s.glow(), y, z - s.glow(), x + s.glow(), y + BEAM_HEIGHT, z + s.glow(),
-                        s.r(), s.g(), s.b(), 0.14f * s.fade());
-                box(pose, builder, x - mid, y, z - mid, x + mid, y + BEAM_HEIGHT, z + mid,
-                        s.r(), s.g(), s.b(), 0.32f * s.fade());
+                // one solid beam; the depth test makes blocks in front of it hide it, like a beacon
                 box(pose, builder, x - s.core(), y, z - s.core(), x + s.core(), y + BEAM_HEIGHT, z + s.core(),
-                        s.r(), s.g(), s.b(), 1.0f * s.fade());
+                        s.r(), s.g(), s.b(), 0.9f * s.fade());
             }
 
             matrices.popPose();
