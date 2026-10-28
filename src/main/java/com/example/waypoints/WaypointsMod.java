@@ -347,7 +347,8 @@ public class WaypointsMod implements ClientModInitializer {
 
     // ---------------- HUD rendering (beam + label) ----------------
     private static final double BEAM_HEIGHT = 320.0;
-    private static final double BEAM_HALF_WIDTH_BLOCKS = 0.12;
+    private static final double CORE_HALF_WIDTH_BLOCKS = 0.16;
+    private static final double GLOW_HALF_WIDTH_BLOCKS = 0.38;
 
     private static void renderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
@@ -389,9 +390,10 @@ public class WaypointsMod implements ClientModInitializer {
             double horiz = Math.sqrt(bx * bx + bz * bz);
             int rgb = resolveColor(w);
 
-            // beam (skipped when you are standing right inside it)
-            if (horiz > 1.5) {
-                drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb);
+            // beam: fades out smoothly as you get close, so it never pops on/off
+            double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 5.0));
+            if (fade > 0.02) {
+                drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
             // label near the base of the beam
@@ -426,10 +428,14 @@ public class WaypointsMod implements ClientModInitializer {
         return new double[]{sw / 2.0 + ndcX * sw / 2.0, sh / 2.0 - ndcY * sh / 2.0, depth};
     }
 
-    /** Draws a tall solid beam: a straight line in 3D is a straight line on screen, so we draw it row by row. */
+    /**
+     * Draws a tall beam: a bright core plus a soft glow. A straight line in 3D is a straight line on screen,
+     * so it is drawn row by row. Edges are anti-aliased with partly transparent pixels so the width
+     * changes smoothly (no popping or flicker) while you walk.
+     */
     private static void drawBeam(GuiGraphicsExtractor g, double bx, double by, double bz,
                                  double[] f, double[] r, double[] u, int sw, int sh,
-                                 double tanHalfFov, double aspect, int rgb) {
+                                 double tanHalfFov, double aspect, int rgb, double fade) {
         double near = 0.1;
         double d0 = bx * f[0] + by * f[1] + bz * f[2];
         double d1 = d0 + BEAM_HEIGHT * f[1];
@@ -444,18 +450,17 @@ public class WaypointsMod implements ClientModInitializer {
         double[] b = project(bx, by + t1 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
         if (a == null || b == null) return;
 
-        int color = 0xE6000000 | rgb;
-        double halfPxPerInvDepth = BEAM_HALF_WIDTH_BLOCKS * (sh / 2.0) / tanHalfFov;
+        double pxPerInvDepth = (sh / 2.0) / tanHalfFov;
         double invA = 1.0 / a[2];
         double invB = 1.0 / b[2];
-
         double yA = a[1];
         double yB = b[1];
+
         if (Math.abs(yB - yA) < 1.0) {
-            int hw = (int) Math.max(1, halfPxPerInvDepth * invA);
+            double hw = Math.max(2.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
             int cx = (int) a[0];
             int cy = (int) yA;
-            g.fill(cx - hw, cy - hw, cx + hw, cy + hw, color);
+            g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(0.95 * fade, rgb));
             return;
         }
 
@@ -466,10 +471,40 @@ public class WaypointsMod implements ClientModInitializer {
             if (frac < 0.0 || frac > 1.0) continue;
             double sx = a[0] + frac * (b[0] - a[0]);
             double inv = invA + frac * (invB - invA);
-            int hw = (int) Math.max(1, Math.round(halfPxPerInvDepth * inv));
-            int ix = (int) sx;
-            if (ix + hw < 0 || ix - hw > sw) continue;
-            g.fill(ix - hw, sy, ix + hw, sy + 1, color);
+
+            // soft glow first, bright core on top
+            double glowHalf = Math.max(2.5, GLOW_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
+            double coreHalf = Math.max(1.4, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
+            drawRowSpan(g, sx, sy, glowHalf, 0.32 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, coreHalf, 0.95 * fade, rgb, sw);
         }
+    }
+
+    /** One horizontal slice of the beam with smooth (anti-aliased) left and right edges. */
+    private static void drawRowSpan(GuiGraphicsExtractor g, double centerX, int sy, double halfWidth,
+                                    double alpha, int rgb, int sw) {
+        double left = centerX - halfWidth;
+        double right = centerX + halfWidth;
+        if (right < 0 || left > sw) return;
+
+        int li = (int) Math.ceil(left);
+        int ri = (int) Math.floor(right);
+        if (ri > li) {
+            g.fill(li, sy, ri, sy + 1, argb(alpha, rgb));
+        }
+        double leftCover = li - left;   // part of the pixel left of the span that is covered
+        if (leftCover > 0.02) {
+            g.fill(li - 1, sy, li, sy + 1, argb(alpha * Math.min(1.0, leftCover), rgb));
+        }
+        double rightCover = right - Math.max(ri, li);
+        if (rightCover > 0.02) {
+            int rx = Math.max(ri, li);
+            g.fill(rx, sy, rx + 1, sy + 1, argb(alpha * Math.min(1.0, rightCover), rgb));
+        }
+    }
+
+    private static int argb(double alpha, int rgb) {
+        int a = (int) Math.round(255.0 * Math.max(0.0, Math.min(1.0, alpha)));
+        return (a << 24) | (rgb & 0xFFFFFF);
     }
 }
