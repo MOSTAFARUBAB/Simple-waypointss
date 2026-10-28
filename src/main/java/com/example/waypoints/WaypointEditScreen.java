@@ -19,6 +19,7 @@ public class WaypointEditScreen extends Screen {
     private EditBox zBox;
     private EditBox colorBox;
     private EditBox timerBox;
+    private EditBox markerTextBox;
     private String error = "";
 
     public WaypointEditScreen(Waypoint original, int returnPage) {
@@ -38,6 +39,7 @@ public class WaypointEditScreen extends Screen {
         int z;
         String color;
         String timer;
+        String markerText;
         if (original != null) {
             name = original.name();
             x = original.x();
@@ -45,6 +47,7 @@ public class WaypointEditScreen extends Screen {
             z = original.z();
             color = original.color() == WaypointsMod.CHROMA ? "chroma"
                     : String.format("%06X", original.color() & 0xFFFFFF);
+            markerText = original.safeMarkerText();
             timer = original.expiresAt() > 0
                     ? String.valueOf(Math.max(1, (original.expiresAt() - System.currentTimeMillis()) / 1000))
                     : "0";
@@ -56,6 +59,7 @@ public class WaypointEditScreen extends Screen {
             y = p.getY();
             z = p.getZ();
             color = "red";
+            markerText = "W";
             timer = "0";
         }
 
@@ -77,8 +81,13 @@ public class WaypointEditScreen extends Screen {
                 btn -> colorBox.setValue(WaypointsMod.nextColorName(colorBox.getValue())))
                 .bounds(cx + 74, 100, 40, 20).build());
 
-        timerBox = numberBox(cx - 30, 130, 100, 0, "Timer");
+        timerBox = numberBox(cx - 30, 130, 80, 0, "Timer");
         timerBox.setValue(timer);
+
+        markerTextBox = new EditBox(this.font, cx + 65, 130, 55, 20, Component.literal("Logo text"));
+        markerTextBox.setMaxLength(1);
+        markerTextBox.setValue(markerText);
+        this.addRenderableWidget(markerTextBox);
 
         this.addRenderableWidget(Button.builder(Component.literal("Save"), btn -> save())
                 .bounds(cx - 150, 168, 70, 20).build());
@@ -139,10 +148,13 @@ public class WaypointEditScreen extends Screen {
             return;
         }
 
+        String markerText = markerTextBox.getValue().trim();
+        if (markerText.isEmpty()) markerText = "W";
+        markerText = markerText.toUpperCase(java.util.Locale.ROOT);
         long expires = secs > 0 ? System.currentTimeMillis() + secs * 1000L : 0L;
         String dim = original != null ? original.dimension() : WaypointsMod.currentDimension();
         WaypointsMod.upsert(original, new Waypoint(name, x, y, z, color, dim, expires,
-                original != null ? original.worldId() : WaypointsMod.currentWorldId()));
+                original != null ? original.worldId() : WaypointsMod.currentWorldId(), markerText));
         back();
     }
 
@@ -156,13 +168,14 @@ public class WaypointEditScreen extends Screen {
         graphics.text(this.font, "Position", cx - 150, 76, 0xFFFFFFFF, true);
         graphics.text(this.font, "Color", cx - 150, 106, 0xFFFFFFFF, true);
         graphics.text(this.font, "Timer (sec)", cx - 150, 136, 0xFFFFFFFF, true);
-        graphics.text(this.font, "0 = never disappears", cx + 76, 136, 0xFF999999, true);
+        graphics.text(this.font, "Logo text (H/W/N)", cx + 65, 122, 0xFFFFFFFF, true);
+        graphics.text(this.font, "0 = never disappears", cx + 76, 153, 0xFF999999, true);
 
         // live color preview
         Integer c = WaypointsMod.parseColor(colorBox.getValue().trim());
         if (c != null) {
             int rgb = c == WaypointsMod.CHROMA
-                    ? WaypointsMod.resolveColor(new Waypoint("", 0, 0, 0, WaypointsMod.CHROMA, "", 0L, ""))
+                    ? WaypointsMod.resolveColor(new Waypoint("", 0, 0, 0, WaypointsMod.CHROMA, "", 0L, "", "W"))
                     : (c & 0xFFFFFF);
             graphics.fill(cx + 120, 104, cx + 140, 116, 0xFF000000 | rgb);
         }

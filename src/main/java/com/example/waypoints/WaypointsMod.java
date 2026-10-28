@@ -70,13 +70,6 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile int menuDimensionMode = 0;
     /** Marker settings are adjustable from the waypoint menu. */
     public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
-    public static volatile int markerColorMode = 0; // red, green, blue, yellow, purple, cyan, white
-    public static volatile int markerTextColorMode = 0; // white, yellow, aqua, green, pink
-
-    private static final int[] MARKER_COLORS = {0xFF2525, 0x35D04F, 0x3987FF, 0xFFD52A, 0xD95CFF, 0x29E6D2, 0xFFFFFF};
-    private static final String[] MARKER_COLOR_NAMES = {"Red", "Green", "Blue", "Yellow", "Purple", "Cyan", "White"};
-    private static final int[] MARKER_TEXT_COLORS = {0xFFFFFF, 0xFFFF55, 0x55FFFF, 0x55FF55, 0xFF55FF};
-    private static final String[] MARKER_TEXT_COLOR_NAMES = {"White", "Yellow", "Aqua", "Green", "Pink"};
 
     public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
     public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
@@ -180,7 +173,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                         feedback(ctx.getSource(), "Unknown color. Use red, green, blue, yellow, pink, cyan, orange, white, a hex code like ff8800, or chroma.");
                                                         return 0;
                                                     }
-                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), c, w.dimension(), w.expiresAt(), w.worldId()));
+                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), c, w.dimension(), w.expiresAt(), w.worldId(), w.safeMarkerText()));
                                                     feedback(ctx.getSource(), ok ? "Color changed." : "No waypoint with that name.");
                                                     return 1;
                                                 }))))
@@ -192,7 +185,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                     String n = StringArgumentType.getString(ctx, "name");
                                                     int secs = IntegerArgumentType.getInteger(ctx, "seconds");
                                                     long at = secs == 0 ? 0L : System.currentTimeMillis() + secs * 1000L;
-                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), at, w.worldId()));
+                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), at, w.worldId(), w.safeMarkerText()));
                                                     feedback(ctx.getSource(), ok ? (secs == 0 ? "Waypoint is now permanent." : "Waypoint will disappear in " + secs + "s.") : "No waypoint with that name.");
                                                     return 1;
                                                 }))))
@@ -274,7 +267,7 @@ public class WaypointsMod implements ClientModInitializer {
                     && (existingId.equals(oldSingleplayerId) || existingId.startsWith("singleplayer-name:"));
             if (unassigned || oldNameBasedId) {
                 WAYPOINTS.set(i, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(),
-                        normalizeDimension(w.dimension()), w.expiresAt(), activeWorldId));
+                        normalizeDimension(w.dimension()), w.expiresAt(), activeWorldId, w.safeMarkerText()));
                 changed = true;
             }
         }
@@ -311,10 +304,6 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     public static String markerSizeLabel() { return switch (markerSizeMode) { case 0 -> "Small"; case 2 -> "Large"; default -> "Medium"; }; }
-    public static String markerColorLabel() { return MARKER_COLOR_NAMES[Math.floorMod(markerColorMode, MARKER_COLOR_NAMES.length)]; }
-    public static String markerTextColorLabel() { return MARKER_TEXT_COLOR_NAMES[Math.floorMod(markerTextColorMode, MARKER_TEXT_COLOR_NAMES.length)]; }
-    public static int markerRgb() { return MARKER_COLORS[Math.floorMod(markerColorMode, MARKER_COLORS.length)]; }
-    public static int markerTextRgb() { return MARKER_TEXT_COLORS[Math.floorMod(markerTextColorMode, MARKER_TEXT_COLORS.length)]; }
 
 
     /** Canonical dimension ID. Older saved files may contain ResourceKey[...] wrappers. */
@@ -465,7 +454,7 @@ public class WaypointsMod implements ClientModInitializer {
 
     static void add(String name, int x, int y, int z) {
         int color = COLORS[WAYPOINTS.size() % 8]; // red, green, blue, ... (skips chroma)
-        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L, currentWorldId()));
+        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L, currentWorldId(), "W"));
         save();
     }
 
@@ -516,7 +505,7 @@ public class WaypointsMod implements ClientModInitializer {
             if (COLORS[i] == w.color()) idx = i;
         }
         int next = COLORS[(idx + 1) % COLORS.length];
-        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), next, w.dimension(), w.expiresAt(), w.worldId()));
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), next, w.dimension(), w.expiresAt(), w.worldId(), w.safeMarkerText()));
     }
 
     /** Timer cycle: permanent > 60s > 5 min > permanent. */
@@ -526,7 +515,7 @@ public class WaypointsMod implements ClientModInitializer {
         if (w.expiresAt() == 0) next = now + 60_000L;
         else if (w.expiresAt() - now < 120_000L) next = now + 300_000L;
         else next = 0L;
-        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), next, w.worldId()));
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), next, w.worldId(), w.safeMarkerText()));
     }
 
     private static boolean update(String name, UnaryOperator<Waypoint> fn) {
@@ -690,7 +679,7 @@ public class WaypointsMod implements ClientModInitializer {
             if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
             // distance is measured from the player, not from the camera
-            drawMarker(graphics, font, w.name(), dist, rgb, sx, sy);
+            drawMarker(graphics, font, w.name(), w.safeMarkerText(), dist, rgb, sx, sy);
         }
     }
 
@@ -752,41 +741,36 @@ public class WaypointsMod implements ClientModInitializer {
         return (int) d + "m";
     }
 
-    private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
+    private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, String markerText, double dist, int rgb, int cx, int cy) {
         String distText = formatDistance(dist);
 
-        // Feather-style logo: crisp red square with a pixel-art white W, similar to the reference.
-        // Integer pixel blocks avoid font glyph glitches and keep edges sharp at every size.
+        // The logo color always follows this waypoint's beam color. Its letter is stored per waypoint.
         int pixel = switch (markerSizeMode) { case 0 -> 1; case 2 -> 3; default -> 2; };
         int iconSize = 5 * pixel + 4;
         int ix = cx - iconSize / 2;
         int iy = cy - iconSize / 2;
-        int logoRed = 0xFF000000 | markerRgb();
+        int logoColor = 0xFF000000 | (rgb & 0xFFFFFF);
         g.fill(ix - 1, iy - 1, ix + iconSize + 1, iy + iconSize + 1, 0xFF202020);
-        g.fill(ix, iy, ix + iconSize, iy + iconSize, logoRed);
-        final String[] wPixels = {"10001", "10001", "10101", "10101", "01010"};
-        int logoLeft = ix + (iconSize - 5 * pixel) / 2;
-        int logoTop = iy + (iconSize - 5 * pixel) / 2;
-        for (int row = 0; row < wPixels.length; row++) {
-            for (int col = 0; col < wPixels[row].length(); col++) {
-                if (wPixels[row].charAt(col) == '1') {
-                    g.fill(logoLeft + col * pixel, logoTop + row * pixel,
-                            logoLeft + (col + 1) * pixel, logoTop + (row + 1) * pixel, 0xFFFFFFFF);
-                }
-            }
-        }
+        g.fill(ix, iy, ix + iconSize, iy + iconSize, logoColor);
+
+        // Use Minecraft's font for the user-selected character(s), centered and kept at native scale.
+        String glyph = markerText == null || markerText.isBlank() ? "W" : markerText;
+        int glyphWidth = font.width(glyph);
+        int glyphX = cx - glyphWidth / 2;
+        int glyphY = iy + Math.max(0, (iconSize - 8) / 2);
+        g.text(font, glyph, glyphX, glyphY, 0xFFFFFFFF, true);
 
         int nameTop = iy + iconSize + 2;
         int nameW = font.width(name);
         int nameH = 9;
         int nameLeft = cx - nameW / 2;
         g.fill(nameLeft - 3, nameTop - 1, nameLeft + nameW + 3, nameTop + nameH, STRIP_COLOR);
-        g.text(font, name, nameLeft, nameTop, 0xFF000000 | markerTextRgb(), true);
+        g.text(font, name, nameLeft, nameTop, 0xFFFFFFFF, true);
 
         int distTop = nameTop + nameH + 1;
         int distW = font.width(distText);
         g.fill(cx - distW / 2 - 4, distTop - 1, cx + distW / 2 + 4, distTop + 10, STRIP_COLOR);
-        g.text(font, distText, cx - distW / 2, distTop, 0xFF000000 | markerTextRgb(), true);
+        g.text(font, distText, cx - distW / 2, distTop, 0xFFFFFFFF, true);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */

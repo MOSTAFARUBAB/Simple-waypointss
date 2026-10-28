@@ -71,14 +71,6 @@ public class WaypointScreen extends Screen {
             WaypointsMod.markerSizeMode = (WaypointsMod.markerSizeMode + 1) % 3;
             open(p);
         }).bounds(cx + 84, 54, 76, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Logo color: " + WaypointsMod.markerColorLabel()), btn -> {
-            WaypointsMod.markerColorMode = (WaypointsMod.markerColorMode + 1) % 7;
-            open(p);
-        }).bounds(cx - 160, 80, 156, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Text color: " + WaypointsMod.markerTextColorLabel()), btn -> {
-            WaypointsMod.markerTextColorMode = (WaypointsMod.markerTextColorMode + 1) % 5;
-            open(p);
-        }).bounds(cx, 80, 160, 20).build());
 
         for (int i = start; i < end; i++) {
             final Waypoint w = all.get(i);
