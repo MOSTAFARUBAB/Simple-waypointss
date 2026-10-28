@@ -1,9 +1,10 @@
 # Simple Waypoints (Fabric, Minecraft 26.3, client-side)
 
-Colored waypoint labels (name + distance) shown through walls. (3D beam: disabled for now on 26.3.)
+Colored waypoint labels (name + distance) shown through walls. A solid beam and a label (name + distance) are drawn on screen at each waypoint.
 
 Controls
 - B (rebind in Controls) -> drop a waypoint at your position
+- J (rebind in Controls) or /wp menu -> waypoint menu: create, edit (name, position, color, timer) and delete
 - /wp add <name>
 - /wp add <name> <x> <y> <z>
 - /wp remove <name>

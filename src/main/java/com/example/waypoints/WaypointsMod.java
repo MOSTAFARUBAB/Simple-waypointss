@@ -6,6 +6,9 @@ import com.google.gson.reflect.TypeToken;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
@@ -31,23 +34,30 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.UnaryOperator;
 
 /**
  * Simple client-side waypoints for Minecraft 26.3 (Fabric, Mojang names).
  *
- * Labels are drawn on the HUD by projecting each waypoint's world position onto the screen,
+ * Beam + label are drawn on the HUD by projecting each waypoint's world position onto the screen,
  * so they show through walls. Waypoints are saved to config/simple-waypoints.json.
  */
 public class WaypointsMod implements ClientModInitializer {
     public static final String MOD_ID = "simplewaypoints";
 
+    static final int CHROMA = -1;
+    private static final int[] COLORS = {0xFF0000, 0x00FF00, 0x3366FF, 0xFFFF00, 0xFF55FF, 0x00FFFF, 0xFF9900, 0xFFFFFF, CHROMA};
+    private static final String[] COLOR_NAMES = {"red", "green", "blue", "yellow", "pink", "cyan", "orange", "white", "chroma"};
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Type LIST_TYPE = new TypeToken<List<Waypoint>>() {}.getType();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("simple-waypoints.json");
-    private static final int[] PALETTE = {0xFF0000, 0x55FF55, 0x5599FF, 0xFFFF55, 0xFF55FF, 0x55FFFF, 0xFFAA00};
 
     private static final List<Waypoint> WAYPOINTS = new ArrayList<>();
     private static KeyMapping addKey;
+    private static KeyMapping menuKey;
+    private static boolean openMenuRequested = false;
 
     @Override
     public void onInitializeClient() {
@@ -55,18 +65,22 @@ public class WaypointsMod implements ClientModInitializer {
         BeamRenderer.init();
 
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
-        addKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.simplewaypoints.add",
-                InputConstants.KEY_B,
-                category));
+        addKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.simplewaypoints.add", InputConstants.KEY_B, category));
+        menuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.simplewaypoints.menu", InputConstants.KEY_J, category));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             purgeExpired();
             while (addKey.consumeClick()) {
                 if (client.player == null) return;
-                BlockPos p = client.player.blockPosition();
-                add("Waypoint" + (WAYPOINTS.size() + 1), p.getX(), p.getY(), p.getZ());
-                client.player.sendSystemMessage(Component.literal("Waypoint added."));
+                addHere();
+                client.player.sendSystemMessage(Component.literal("Waypoint added. Press J to edit or delete it."));
+            }
+            while (menuKey.consumeClick()) {
+                openMenuRequested = true;
+            }
+            if (openMenuRequested) {
+                openMenuRequested = false;
+                if (client.player != null) WaypointScreen.openMenu();
             }
         });
 
@@ -79,9 +93,24 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     // ---------------- commands ----------------
+    private static CompletableFuture<Suggestions> suggestNames(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder b) {
+        for (Waypoint w : WAYPOINTS) b.suggest(w.name());
+        return b.buildFuture();
+    }
+
+    private static CompletableFuture<Suggestions> suggestColors(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder b) {
+        for (String n : COLOR_NAMES) b.suggest(n);
+        return b.buildFuture();
+    }
+
     private void registerCommands() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) ->
                 dispatcher.register(ClientCommands.literal("wp")
+                        .then(ClientCommands.literal("menu")
+                                .executes(ctx -> {
+                                    openMenuRequested = true;
+                                    return 1;
+                                }))
                         .then(ClientCommands.literal("add")
                                 .then(ClientCommands.argument("name", StringArgumentType.word())
                                         .executes(ctx -> {
@@ -103,6 +132,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                                 }))))))
                         .then(ClientCommands.literal("remove")
                                 .then(ClientCommands.argument("name", StringArgumentType.word())
+                                        .suggests(WaypointsMod::suggestNames)
                                         .executes(ctx -> {
                                             String n = StringArgumentType.getString(ctx, "name");
                                             boolean removed = WAYPOINTS.removeIf(w -> w.name().equalsIgnoreCase(n));
@@ -112,7 +142,9 @@ public class WaypointsMod implements ClientModInitializer {
                                         })))
                         .then(ClientCommands.literal("color")
                                 .then(ClientCommands.argument("name", StringArgumentType.word())
+                                        .suggests(WaypointsMod::suggestNames)
                                         .then(ClientCommands.argument("color", StringArgumentType.word())
+                                                .suggests(WaypointsMod::suggestColors)
                                                 .executes(ctx -> {
                                                     String n = StringArgumentType.getString(ctx, "name");
                                                     Integer c = parseColor(StringArgumentType.getString(ctx, "color"));
@@ -126,6 +158,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                 }))))
                         .then(ClientCommands.literal("expire")
                                 .then(ClientCommands.argument("name", StringArgumentType.word())
+                                        .suggests(WaypointsMod::suggestNames)
                                         .then(ClientCommands.argument("seconds", IntegerArgumentType.integer(0))
                                                 .executes(ctx -> {
                                                     String n = StringArgumentType.getString(ctx, "name");
@@ -159,9 +192,82 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     // ---------------- data ----------------
-    static final int CHROMA = -1;
+    static List<Waypoint> waypoints() {
+        return WAYPOINTS;
+    }
 
-    private static boolean update(String name, java.util.function.UnaryOperator<Waypoint> fn) {
+    static String currentDimension() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.level != null ? mc.level.dimension().toString() : "unknown";
+    }
+
+    static void add(String name, int x, int y, int z) {
+        int color = COLORS[WAYPOINTS.size() % 8]; // red, green, blue, ... (skips chroma)
+        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L));
+        save();
+    }
+
+    static void addHere() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+        BlockPos p = mc.player.blockPosition();
+        add("Waypoint" + (WAYPOINTS.size() + 1), p.getX(), p.getY(), p.getZ());
+    }
+
+    static void remove(Waypoint w) {
+        WAYPOINTS.remove(w);
+        save();
+    }
+
+    /** Adds a new waypoint (old == null) or replaces an existing one. */
+    static void upsert(Waypoint old, Waypoint neu) {
+        if (old == null) {
+            WAYPOINTS.add(neu);
+            save();
+        } else {
+            replace(old, neu);
+        }
+    }
+
+    /** Given text from a color box, returns the name of the next color in the cycle. */
+    static String nextColorName(String current) {
+        Integer c = parseColor(current.trim());
+        int idx = -1;
+        for (int i = 0; i < COLORS.length; i++) {
+            if (c != null && COLORS[i] == c) idx = i;
+        }
+        return COLOR_NAMES[(idx + 1) % COLOR_NAMES.length];
+    }
+
+    private static void replace(Waypoint old, Waypoint neu) {
+        int i = WAYPOINTS.indexOf(old);
+        if (i >= 0) {
+            WAYPOINTS.set(i, neu);
+            save();
+        }
+    }
+
+    /** Next color in the cycle: red > green > blue > yellow > pink > cyan > orange > white > rainbow. */
+    static void cycleColor(Waypoint w) {
+        int idx = 0;
+        for (int i = 0; i < COLORS.length; i++) {
+            if (COLORS[i] == w.color()) idx = i;
+        }
+        int next = COLORS[(idx + 1) % COLORS.length];
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), next, w.dimension(), w.expiresAt()));
+    }
+
+    /** Timer cycle: permanent > 60s > 5 min > permanent. */
+    static void cycleTimer(Waypoint w) {
+        long now = System.currentTimeMillis();
+        long next;
+        if (w.expiresAt() == 0) next = now + 60_000L;
+        else if (w.expiresAt() - now < 120_000L) next = now + 300_000L;
+        else next = 0L;
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), next));
+    }
+
+    private static boolean update(String name, UnaryOperator<Waypoint> fn) {
         boolean found = false;
         for (int i = 0; i < WAYPOINTS.size(); i++) {
             Waypoint w = WAYPOINTS.get(i);
@@ -179,7 +285,7 @@ public class WaypointsMod implements ClientModInitializer {
         if (WAYPOINTS.removeIf(w -> w.expiresAt() > 0 && now > w.expiresAt())) save();
     }
 
-    private static Integer parseColor(String s) {
+    static Integer parseColor(String s) {
         switch (s.toLowerCase()) {
             case "red": return 0xFF0000;
             case "green": return 0x00FF00;
@@ -220,21 +326,6 @@ public class WaypointsMod implements ClientModInitializer {
         return ((int) (r * 255) << 16) | ((int) (g * 255) << 8) | (int) (b * 255);
     }
 
-    static List<Waypoint> waypoints() {
-        return WAYPOINTS;
-    }
-
-    static String currentDimension() {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.level != null ? mc.level.dimension().toString() : "unknown";
-    }
-
-    private static void add(String name, int x, int y, int z) {
-        int color = PALETTE[WAYPOINTS.size() % PALETTE.length];
-        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L));
-        save();
-    }
-
     private static void load() {
         try {
             if (Files.exists(FILE)) {
@@ -254,7 +345,10 @@ public class WaypointsMod implements ClientModInitializer {
         }
     }
 
-    // ---------------- HUD rendering ----------------
+    // ---------------- HUD rendering (beam + label) ----------------
+    private static final double BEAM_HEIGHT = 320.0;
+    private static final double BEAM_HALF_WIDTH_BLOCKS = 0.12;
+
     private static void renderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || WAYPOINTS.isEmpty()) return;
@@ -271,10 +365,12 @@ public class WaypointsMod implements ClientModInitializer {
         double rx = -Math.cos(yaw);
         double ry = 0;
         double rz = -Math.sin(yaw);
-        // up = right x forward
         double ux = ry * fz - rz * fy;
         double uy = rz * fx - rx * fz;
         double uz = rx * fy - ry * fx;
+        double[] f = {fx, fy, fz};
+        double[] r = {rx, ry, rz};
+        double[] u = {ux, uy, uz};
 
         int sw = mc.getWindow().getGuiScaledWidth();
         int sh = mc.getWindow().getGuiScaledHeight();
@@ -287,32 +383,93 @@ public class WaypointsMod implements ClientModInitializer {
         for (Waypoint w : WAYPOINTS) {
             if (!w.dimension().equals(dim)) continue;
 
-            double dx = w.x() + 0.5 - eye.x;
-            double dy = w.y() + 1.2 - eye.y;
-            double dz = w.z() + 0.5 - eye.z;
+            double bx = w.x() + 0.5 - eye.x;
+            double by = w.y() - eye.y;
+            double bz = w.z() + 0.5 - eye.z;
+            double horiz = Math.sqrt(bx * bx + bz * bz);
+            int rgb = resolveColor(w);
 
-            double depth = dx * fx + dy * fy + dz * fz;
-            if (depth < 0.1) continue; // behind the camera
+            // beam (skipped when you are standing right inside it)
+            if (horiz > 1.5) {
+                drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb);
+            }
 
-            double side = dx * rx + dy * ry + dz * rz;
-            double up = dx * ux + dy * uy + dz * uz;
-
-            double ndcX = side / (depth * tanHalfFov * aspect);
-            double ndcY = up / (depth * tanHalfFov);
-
-            int sx = (int) (sw / 2.0 + ndcX * sw / 2.0);
-            int sy = (int) (sh / 2.0 - ndcY * sh / 2.0);
+            // label near the base of the beam
+            double dx = bx;
+            double dy = by + 1.2;
+            double dz = bz;
+            double[] p = project(dx, dy, dz, f, r, u, sw, sh, tanHalfFov, aspect);
+            if (p == null) continue;
+            int sx = (int) p[0];
+            int sy = (int) p[1];
             if (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) continue;
 
             double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-            // Feather-style label: "Name (19m)" in white on a dark box, at the base of the beam.
             String text = w.name() + " (" + (int) dist + "m)";
             int tw = font.width(text);
             int x0 = sx - tw / 2;
             int y0 = sy - 4;
             graphics.fill(x0 - 2, y0 - 2, x0 + tw + 2, y0 + 10, 0x90000000);
             graphics.text(font, text, x0, y0, 0xFFFFFFFF, false);
+        }
+    }
+
+    /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */
+    private static double[] project(double dx, double dy, double dz, double[] f, double[] r, double[] u,
+                                    int sw, int sh, double tanHalfFov, double aspect) {
+        double depth = dx * f[0] + dy * f[1] + dz * f[2];
+        if (depth < 0.1) return null;
+        double side = dx * r[0] + dy * r[1] + dz * r[2];
+        double up = dx * u[0] + dy * u[1] + dz * u[2];
+        double ndcX = side / (depth * tanHalfFov * aspect);
+        double ndcY = up / (depth * tanHalfFov);
+        return new double[]{sw / 2.0 + ndcX * sw / 2.0, sh / 2.0 - ndcY * sh / 2.0, depth};
+    }
+
+    /** Draws a tall solid beam: a straight line in 3D is a straight line on screen, so we draw it row by row. */
+    private static void drawBeam(GuiGraphicsExtractor g, double bx, double by, double bz,
+                                 double[] f, double[] r, double[] u, int sw, int sh,
+                                 double tanHalfFov, double aspect, int rgb) {
+        double near = 0.1;
+        double d0 = bx * f[0] + by * f[1] + bz * f[2];
+        double d1 = d0 + BEAM_HEIGHT * f[1];
+        if (d0 < near && d1 < near) return;
+
+        double t0 = 0.0;
+        double t1 = 1.0;
+        if (d0 < near) t0 = (near - d0) / (d1 - d0);
+        else if (d1 < near) t1 = (near - d0) / (d1 - d0);
+
+        double[] a = project(bx, by + t0 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        double[] b = project(bx, by + t1 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        if (a == null || b == null) return;
+
+        int color = 0xE6000000 | rgb;
+        double halfPxPerInvDepth = BEAM_HALF_WIDTH_BLOCKS * (sh / 2.0) / tanHalfFov;
+        double invA = 1.0 / a[2];
+        double invB = 1.0 / b[2];
+
+        double yA = a[1];
+        double yB = b[1];
+        if (Math.abs(yB - yA) < 1.0) {
+            int hw = (int) Math.max(1, halfPxPerInvDepth * invA);
+            int cx = (int) a[0];
+            int cy = (int) yA;
+            g.fill(cx - hw, cy - hw, cx + hw, cy + hw, color);
+            return;
+        }
+
+        int rowStart = (int) Math.max(0, Math.floor(Math.min(yA, yB)));
+        int rowEnd = (int) Math.min(sh, Math.ceil(Math.max(yA, yB)));
+        for (int sy = rowStart; sy < rowEnd; sy++) {
+            double frac = (sy - yA) / (yB - yA);
+            if (frac < 0.0 || frac > 1.0) continue;
+            double sx = a[0] + frac * (b[0] - a[0]);
+            double inv = invA + frac * (invB - invA);
+            int hw = (int) Math.max(1, Math.round(halfPxPerInvDepth * inv));
+            int ix = (int) sx;
+            if (ix + hw < 0 || ix - hw > sw) continue;
+            g.fill(ix - hw, sy, ix + hw, sy + 1, color);
         }
     }
 }
