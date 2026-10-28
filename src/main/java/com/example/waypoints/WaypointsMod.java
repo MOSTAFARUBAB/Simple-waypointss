@@ -404,24 +404,108 @@ public class WaypointsMod implements ClientModInitializer {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
-            // label near the base of the beam
+            // Feather-style marker: colored letter icon, small name, distance with one decimal
             double dx = bx;
-            double dy = by + 1.2;
+            double dy = by + 1.5;
             double dz = bz;
             double[] p = project(dx, dy, dz, f, r, u, sw, sh, tanHalfFov, aspect);
             if (p == null) continue;
             int sx = (int) p[0];
             int sy = (int) p[1];
-            if (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) continue;
+            if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
-            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            String text = w.name() + " (" + (int) dist + "m)";
-            int tw = font.width(text);
-            int x0 = sx - tw / 2;
-            int y0 = sy - 4;
-            graphics.fill(x0 - 2, y0 - 2, x0 + tw + 2, y0 + 10, 0x90000000);
-            graphics.text(font, text, x0, y0, 0xFFFFFFFF, false);
+            double dist = Math.sqrt(bx * bx + (by + 0.5) * (by + 0.5) + bz * bz);
+            drawMarker(graphics, font, w.name(), dist, rgb, sx, sy);
         }
+    }
+
+    // ---------------- Feather-style marker ----------------
+    private static final int ICON_SIZE = 11;
+    private static final int STRIP_COLOR = 0x90000000;
+
+    private static java.lang.reflect.Method M_POSE, M_PUSH, M_POP, M_TRANSLATE, M_SCALE;
+    private static boolean scaleChecked = false;
+    private static boolean scaleOk = false;
+
+    /** Text scaling uses the GUI pose stack, looked up by reflection. If that is not available, text just stays full size. */
+    private static void initScale(GuiGraphicsExtractor g) {
+        scaleChecked = true;
+        try {
+            M_POSE = g.getClass().getMethod("pose");
+            Object pose = M_POSE.invoke(g);
+            Class<?> pc = pose.getClass();
+            M_PUSH = pc.getMethod("pushMatrix");
+            M_POP = pc.getMethod("popMatrix");
+            M_TRANSLATE = pc.getMethod("translate", float.class, float.class);
+            M_SCALE = pc.getMethod("scale", float.class, float.class);
+            scaleOk = true;
+        } catch (Throwable t) {
+            scaleOk = false;
+        }
+    }
+
+    private static void drawCenteredText(GuiGraphicsExtractor g, Font font, String text, int cx, int top, float scale, int color) {
+        int w = font.width(text);
+        if (!scaleOk || scale == 1f) {
+            g.text(font, text, cx - w / 2, top, color, true);
+            return;
+        }
+        Object pose = null;
+        boolean pushed = false;
+        try {
+            pose = M_POSE.invoke(g);
+            M_PUSH.invoke(pose);
+            pushed = true;
+            M_TRANSLATE.invoke(pose, (float) cx, (float) top);
+            M_SCALE.invoke(pose, scale, scale);
+            g.text(font, text, -w / 2, 0, color, true);
+        } catch (Throwable t) {
+            scaleOk = false;
+        } finally {
+            if (pushed) {
+                try {
+                    M_POP.invoke(pose);
+                } catch (Throwable ignored) {
+                    scaleOk = false;
+                }
+            }
+        }
+    }
+
+    private static String formatDistance(double d) {
+        if (d < 1000.0) return String.format(java.util.Locale.ROOT, "%.1fm", d);
+        return (int) d + "m";
+    }
+
+    private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
+        if (!scaleChecked) initScale(g);
+
+        float nameScale = scaleOk ? 0.6f : 1f;
+        String distText = formatDistance(dist);
+        String letter = name.isEmpty() ? "W" : new String(Character.toChars(Character.toUpperCase(name.codePointAt(0))));
+
+        // --- icon: rounded colored square with the first letter ---
+        int ix = cx - ICON_SIZE / 2;
+        int iy = cy - ICON_SIZE / 2;
+        int fillColor = 0xFF000000 | rgb;
+        g.fill(ix + 1, iy, ix + ICON_SIZE - 1, iy + ICON_SIZE, fillColor);
+        g.fill(ix, iy + 1, ix + ICON_SIZE, iy + ICON_SIZE - 1, fillColor);
+        int lum = (((rgb >> 16) & 0xFF) * 299 + ((rgb >> 8) & 0xFF) * 587 + (rgb & 0xFF) * 114) / 1000;
+        int letterColor = lum > 170 ? 0xFF101010 : 0xFFFFFFFF;
+        g.text(font, letter, cx - font.width(letter) / 2, iy + 2, letterColor, false);
+
+        // --- name: small text on a dark strip ---
+        int nameTop = iy + ICON_SIZE + 1;
+        int nameW = (int) Math.ceil(font.width(name) * nameScale);
+        int nameH = (int) Math.ceil(9 * nameScale);
+        g.fill(cx - nameW / 2 - 2, nameTop, cx - nameW / 2 + nameW + 2, nameTop + nameH + 2, STRIP_COLOR);
+        drawCenteredText(g, font, name, cx, nameTop + 1, nameScale, 0xFFFFFFFF);
+
+        // --- distance: normal-size text on a dark strip ---
+        int distTop = nameTop + nameH + 2;
+        int distW = font.width(distText);
+        g.fill(cx - distW / 2 - 3, distTop, cx - distW / 2 + distW + 3, distTop + 11, STRIP_COLOR);
+        g.text(font, distText, cx - distW / 2, distTop + 1, 0xFFFFFFFF, true);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */
