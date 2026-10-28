@@ -215,12 +215,31 @@ public class WaypointsMod implements ClientModInitializer {
 
     /** Waypoints visible in the current save/server and current dimension. */
     public static List<Waypoint> currentContextWaypoints() {
+        return waypointsForDimension(currentDimension());
+    }
+
+    /** Waypoints for the current save/server, optionally across dimensions for the menu. */
+    public static List<Waypoint> waypointsForDimension(String dimensionFilter) {
         String worldId = currentWorldId();
-        String dimension = currentDimension();
         return WAYPOINTS.stream()
                 .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
-                .filter(w -> java.util.Objects.equals(w.dimension(), dimension))
+                .filter(w -> "all".equals(dimensionFilter) || java.util.Objects.equals(w.dimension(), dimensionFilter))
                 .toList();
+    }
+
+    /** Generate numbering independently for each server/save and dimension. */
+    public static String nextWaypointName(String worldId, String dimension) {
+        int max = 0;
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?i)^Waypoint\s*(\d+)$");
+        for (Waypoint w : WAYPOINTS) {
+            if (!java.util.Objects.equals(w.worldId(), worldId) || !java.util.Objects.equals(w.dimension(), dimension)) continue;
+            java.util.regex.Matcher matcher = pattern.matcher(w.name());
+            if (matcher.matches()) {
+                try { max = Math.max(max, Integer.parseInt(matcher.group(1))); }
+                catch (NumberFormatException ignored) { }
+            }
+        }
+        return "Waypoint" + (max + 1);
     }
 
     public static String currentDimension() {
@@ -254,7 +273,7 @@ public class WaypointsMod implements ClientModInitializer {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         BlockPos p = mc.player.blockPosition();
-        add("Waypoint" + (WAYPOINTS.size() + 1), p.getX(), p.getY(), p.getZ());
+        add(nextWaypointName(currentWorldId(), currentDimension()), p.getX(), p.getY(), p.getZ());
     }
 
     static void remove(Waypoint w) {
@@ -416,12 +435,14 @@ public class WaypointsMod implements ClientModInitializer {
         double fx = -Math.sin(yaw) * Math.cos(pitch);
         double fy = -Math.sin(pitch);
         double fz = Math.cos(yaw) * Math.cos(pitch);
-        double rx = -Math.cos(yaw);
+        double rx = Math.cos(yaw);
         double ry = 0;
-        double rz = -Math.sin(yaw);
-        double ux = ry * fz - rz * fy;
-        double uy = rz * fx - rx * fz;
-        double uz = rx * fy - ry * fx;
+        double rz = Math.sin(yaw);
+        // Camera-up basis must point upward for every yaw/pitch. The previous
+        // cross-product order inverted the screen basis and caused labels to drift.
+        double ux = -Math.sin(yaw) * Math.sin(pitch);
+        double uy = Math.cos(pitch);
+        double uz = -Math.cos(yaw) * Math.sin(pitch);
         double[] f = {fx, fy, fz};
         double[] r = {rx, ry, rz};
         double[] u = {ux, uy, uz};
@@ -458,7 +479,8 @@ public class WaypointsMod implements ClientModInitializer {
             double pdy = w.y() + 0.5 - playerEye.y;
             double pdz = w.z() + 0.5 - playerEye.z;
             double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
-            if (dist < 2.5) continue;
+            // Keep the marker visible when approaching from an angle. Projection below
+            // safely rejects points behind the camera; distance alone must not hide it.
 
             // Feather-style marker: colored letter icon, small name, distance with one decimal
             double dx = bx;

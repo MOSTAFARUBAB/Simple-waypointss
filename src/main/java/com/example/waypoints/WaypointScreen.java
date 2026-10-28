@@ -12,9 +12,36 @@ import java.util.List;
 public class WaypointScreen extends Screen {
     private static final int PER_PAGE = 6;
     private static final int ROW_H = 24;
-    private static final int TOP = 82;
+    private static final int TOP = 106;
 
     private final int page;
+    private static String dimensionFilter = "current";
+
+    private static String resolvedDimensionFilter() {
+        if ("current".equals(dimensionFilter)) return WaypointsMod.currentDimension();
+        if ("all".equals(dimensionFilter)) return "all";
+        return switch (dimensionFilter) {
+            case "overworld" -> "minecraft:overworld";
+            case "nether" -> "minecraft:the_nether";
+            case "end" -> "minecraft:the_end";
+            default -> WaypointsMod.currentDimension();
+        };
+    }
+
+    private static String dimensionLabel() {
+        return switch (dimensionFilter) {
+            case "current" -> "Current";
+            case "overworld" -> "Overworld";
+            case "nether" -> "Nether";
+            case "end" -> "End";
+            case "all" -> "All Dimensions";
+            default -> "Current";
+        };
+    }
+
+    private static List<Waypoint> visibleWaypoints() {
+        return WaypointsMod.waypointsForDimension(resolvedDimensionFilter());
+    }
 
     public WaypointScreen(int page) {
         super(Component.literal("Waypoints"));
@@ -30,7 +57,7 @@ public class WaypointScreen extends Screen {
     }
 
     private int pages() {
-        int n = WaypointsMod.currentContextWaypoints().size();
+        int n = visibleWaypoints().size();
         return Math.max(1, (n + PER_PAGE - 1) / PER_PAGE);
     }
 
@@ -40,7 +67,7 @@ public class WaypointScreen extends Screen {
 
     @Override
     protected void init() {
-        List<Waypoint> all = WaypointsMod.currentContextWaypoints();
+        List<Waypoint> all = visibleWaypoints();
         final int p = currentPage();
         int start = p * PER_PAGE;
         int end = Math.min(all.size(), start + PER_PAGE);
@@ -63,6 +90,16 @@ public class WaypointScreen extends Screen {
             WaypointsMod.beamThickness = (WaypointsMod.beamThickness + 1) % 3;
             open(p);
         }).bounds(cx - 160, 54, 110, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Dimension: " + dimensionLabel()), btn -> {
+            dimensionFilter = switch (dimensionFilter) {
+                case "current" -> "overworld";
+                case "overworld" -> "nether";
+                case "nether" -> "end";
+                case "end" -> "all";
+                default -> "current";
+            };
+            open(0);
+        }).bounds(cx - 160, 78, 160, 20).build());
 
         for (int i = start; i < end; i++) {
             final Waypoint w = all.get(i);
@@ -99,8 +136,9 @@ public class WaypointScreen extends Screen {
         int cx = this.width / 2;
         graphics.text(this.font, "Waypoints  (page " + (currentPage() + 1) + "/" + pages() + ")",
                 cx + 5, 34, 0xFFFFFFFF, true);
+        graphics.text(this.font, "Viewing: " + dimensionLabel(), cx + 8, 82, 0xFFAAAAAA, true);
 
-        List<Waypoint> all = WaypointsMod.currentContextWaypoints();
+        List<Waypoint> all = visibleWaypoints();
         if (all.isEmpty()) {
             graphics.text(this.font, "No waypoints yet. Click \"+ New Waypoint\".",
                     cx - 160, TOP + 4, 0xFFAAAAAA, true);
