@@ -16,8 +16,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 9.7.1
-      - name: Build
-        run: gradle build --no-daemon
+      - name: Build 3D beacon beam
+        run: gradle clean build --no-daemon -PwithBeam=true
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
