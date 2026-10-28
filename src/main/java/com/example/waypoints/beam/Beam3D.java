@@ -57,8 +57,10 @@ public final class Beam3D {
             double[] cam = WaypointsMod.cameraState(mc);
             if (cam != null) eye = new Vec3(cam[0], cam[1], cam[2]);
             String dim = WaypointsMod.currentDimension();
+            String worldId = WaypointsMod.currentWorldId();
             List<BeamState> out = new ArrayList<>();
             for (Waypoint w : WaypointsMod.waypoints()) {
+                if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
                 if (!w.dimension().equals(dim)) continue;
 
                 double dx = w.x() + 0.5 - eye.x;

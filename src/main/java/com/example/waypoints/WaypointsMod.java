@@ -21,6 +21,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.core.BlockPos;
@@ -161,7 +162,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                         feedback(ctx.getSource(), "Unknown color. Use red, green, blue, yellow, pink, cyan, orange, white, a hex code like ff8800, or chroma.");
                                                         return 0;
                                                     }
-                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), c, w.dimension(), w.expiresAt()));
+                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), c, w.dimension(), w.expiresAt(), w.worldId()));
                                                     feedback(ctx.getSource(), ok ? "Color changed." : "No waypoint with that name.");
                                                     return 1;
                                                 }))))
@@ -173,7 +174,7 @@ public class WaypointsMod implements ClientModInitializer {
                                                     String n = StringArgumentType.getString(ctx, "name");
                                                     int secs = IntegerArgumentType.getInteger(ctx, "seconds");
                                                     long at = secs == 0 ? 0L : System.currentTimeMillis() + secs * 1000L;
-                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), at));
+                                                    boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), at, w.worldId()));
                                                     feedback(ctx.getSource(), ok ? (secs == 0 ? "Waypoint is now permanent." : "Waypoint will disappear in " + secs + "s.") : "No waypoint with that name.");
                                                     return 1;
                                                 }))))
@@ -210,9 +211,25 @@ public class WaypointsMod implements ClientModInitializer {
         return mc.level != null ? mc.level.dimension().toString() : "unknown";
     }
 
+    /** Stable scope for a waypoint: separate local saves and separate multiplayer servers. */
+    public static String currentWorldId() {
+        Minecraft mc = Minecraft.getInstance();
+        ServerData server = mc.getCurrentServer();
+        if (server != null && server.ip != null && !server.ip.isBlank()) {
+            return "server:" + server.ip.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+        if (mc.getSingleplayerServer() != null) {
+            String levelName = mc.getSingleplayerServer().getWorldData().getLevelName();
+            if (levelName != null && !levelName.isBlank()) {
+                return "singleplayer:" + levelName.trim();
+            }
+        }
+        return "unknown";
+    }
+
     static void add(String name, int x, int y, int z) {
         int color = COLORS[WAYPOINTS.size() % 8]; // red, green, blue, ... (skips chroma)
-        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L));
+        WAYPOINTS.add(new Waypoint(name, x, y, z, color, currentDimension(), 0L, currentWorldId()));
         save();
     }
 
@@ -263,7 +280,7 @@ public class WaypointsMod implements ClientModInitializer {
             if (COLORS[i] == w.color()) idx = i;
         }
         int next = COLORS[(idx + 1) % COLORS.length];
-        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), next, w.dimension(), w.expiresAt()));
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), next, w.dimension(), w.expiresAt(), w.worldId()));
     }
 
     /** Timer cycle: permanent > 60s > 5 min > permanent. */
@@ -273,7 +290,7 @@ public class WaypointsMod implements ClientModInitializer {
         if (w.expiresAt() == 0) next = now + 60_000L;
         else if (w.expiresAt() - now < 120_000L) next = now + 300_000L;
         else next = 0L;
-        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), next));
+        replace(w, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), next, w.worldId()));
     }
 
     private static boolean update(String name, UnaryOperator<Waypoint> fn) {
@@ -399,8 +416,10 @@ public class WaypointsMod implements ClientModInitializer {
 
         Font font = mc.font;
         String dim = currentDimension();
+        String worldId = currentWorldId();
 
         for (Waypoint w : WAYPOINTS) {
+            if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
             if (!w.dimension().equals(dim)) continue;
 
             double bx = w.x() + 0.5 - eye.x;
