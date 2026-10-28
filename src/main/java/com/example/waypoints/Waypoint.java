@@ -1,8 +1,9 @@
-package com.example.waypoints;
+// Create a waypoint at coordinates (100, 65, -200)
+WaypointBuilder builder = waypointService.createWaypointBuilder(100, 65, -200);
 
-/**
- * color: 0xRRGGBB, or -1 for the rainbow "chroma" effect.
- * expiresAt: epoch millis when the waypoint disappears, 0 = permanent.
- */
-public record Waypoint(String name, int x, int y, int z, int color, String dimension, long expiresAt) {
-}
+// Configure the waypoint with a name and color
+builder.withName("Resource Area")
+       .withColor(WaypointColor.fromRgb(255, 0, 0)); // Red color
+
+// Create the waypoint for the player
+UUID waypointId = waypointService.createWaypoint(player, builder);
