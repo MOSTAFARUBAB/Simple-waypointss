@@ -206,6 +206,16 @@ public class WaypointsMod implements ClientModInitializer {
         return WAYPOINTS;
     }
 
+    /** Waypoints visible in the current save/server and current dimension. */
+    public static List<Waypoint> currentContextWaypoints() {
+        String worldId = currentWorldId();
+        String dimension = currentDimension();
+        return WAYPOINTS.stream()
+                .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
+                .filter(w -> java.util.Objects.equals(w.dimension(), dimension))
+                .toList();
+    }
+
     public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
         return mc.level != null ? mc.level.dimension().toString() : "unknown";
