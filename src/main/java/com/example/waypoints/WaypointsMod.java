@@ -64,9 +64,11 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile boolean beam3dActive = false;
     public static volatile boolean showWaypointLabels = true;
     public static volatile boolean showWaypointBeams = true;
-    // Match the vanilla beacon beam proportions; do not widen the native beam.
-    public static float beamInnerRadius() { return 0.2f; }
-    public static float beamOuterRadius() { return 0.25f; }
+    /** 0=normal, 1=thick, 2=extra thick. */
+    public static volatile int beamThickness = 1;
+
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
 
 
     @Override
@@ -213,65 +215,56 @@ public class WaypointsMod implements ClientModInitializer {
 
     /** Waypoints visible in the current save/server and current dimension. */
     public static List<Waypoint> currentContextWaypoints() {
-        return waypointsForDimension(currentDimension());
-    }
-
-    /** Waypoints for the current save/server, optionally across dimensions for the menu. */
-    public static List<Waypoint> waypointsForDimension(String dimensionFilter) {
         String worldId = currentWorldId();
-        String requested = normalizeDimension(dimensionFilter);
+        String dimension = currentDimension();
         return WAYPOINTS.stream()
-                .filter(w -> sameWorld(w.worldId(), worldId))
-                .filter(w -> "all".equals(normalizeDimension(dimensionFilter)) || sameDimension(w.dimension(), requested))
+                .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
+                .filter(w -> java.util.Objects.equals(normalizeDimension(w.dimension()), dimension))
                 .toList();
     }
 
-    /**
-     * Minecraft 26.3 can stringify a dimension key as
-     * "ResourceKey[minecraft:dimension / minecraft:overworld]" rather than
-     * just "minecraft:overworld". Normalize both forms so saved waypoints,
-     * the menu selector and rendering all agree.
-     */
-    private static String normalizeDimension(String raw) {
+    /** Canonical dimension ID. Older saved files may contain ResourceKey[...] wrappers. */
+    public static String normalizeDimension(String raw) {
         if (raw == null || raw.isBlank()) return "unknown";
         String value = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        // Minecraft 26.x ResourceKey.toString() can wrap the identifier in descriptive text.
         if (value.contains("minecraft:overworld")) return "minecraft:overworld";
-        if (value.contains("minecraft:the_nether")) return "minecraft:the_nether";
-        if (value.contains("minecraft:the_end")) return "minecraft:the_end";
-        int slash = value.lastIndexOf('/');
-        if (slash >= 0) value = value.substring(slash + 1);
-        value = value.replace("]", "").replace(")", "").trim();
-        if (value.startsWith("resourcekey[")) return "unknown";
-        return value;
-    }
-
-    public static boolean sameDimension(String a, String b) {
-        return java.util.Objects.equals(normalizeDimension(a), normalizeDimension(b));
-    }
-
-    private static boolean sameWorld(String a, String b) {
-        if (a == null || b == null) return false;
-        return a.trim().replaceAll("\\s+", "").equalsIgnoreCase(b.trim().replaceAll("\\s+", ""));
-    }
-
-    /** Generate numbering independently for each server/save and dimension. */
-    public static String nextWaypointName(String worldId, String dimension) {
-        int max = 0;
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?i)^Waypoint\\s*(\\d+)$");
-        for (Waypoint w : WAYPOINTS) {
-            if (!java.util.Objects.equals(w.worldId(), worldId) || !java.util.Objects.equals(w.dimension(), dimension)) continue;
-            java.util.regex.Matcher matcher = pattern.matcher(w.name());
-            if (matcher.matches()) {
-                try { max = Math.max(max, Integer.parseInt(matcher.group(1))); }
-                catch (NumberFormatException ignored) { }
-            }
+        if (value.contains("minecraft:the_nether") || value.contains("minecraft:nether")) return "minecraft:the_nether";
+        if (value.contains("minecraft:the_end") || value.contains("minecraft:end")) return "minecraft:the_end";
+        // Support namespaced modded dimensions as well as older wrapper formats.
+        int colon = value.indexOf(':');
+        if (colon >= 1) {
+            int start = colon - 1;
+            while (start >= 0 && (Character.isLetterOrDigit(value.charAt(start)) || "_.-".indexOf(value.charAt(start)) >= 0)) start--;
+            int end = colon + 1;
+            while (end < value.length() && (Character.isLetterOrDigit(value.charAt(end)) || "_./-".indexOf(value.charAt(end)) >= 0)) end++;
+            if (start + 1 < colon && end > colon + 1) return value.substring(start + 1, end);
         }
-        return "Waypoint" + (max + 1);
+        return value.replace("resourcekey[", "").replace("]", "").trim();
     }
 
     public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
         return mc.level != null ? normalizeDimension(mc.level.dimension().toString()) : "unknown";
+    }
+
+    /** Pick the next free default name only within this save/server and dimension. */
+    public static String nextWaypointName() {
+        String worldId = currentWorldId();
+        String dimension = currentDimension();
+        java.util.Set<Integer> used = new java.util.HashSet<>();
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?i)^Waypoint\\s*(\\d+)$");
+        for (Waypoint w : WAYPOINTS) {
+            if (!java.util.Objects.equals(w.worldId(), worldId)
+                    || !java.util.Objects.equals(normalizeDimension(w.dimension()), dimension)) continue;
+            java.util.regex.Matcher matcher = pattern.matcher(w.name());
+            if (matcher.matches()) {
+                try { used.add(Integer.parseInt(matcher.group(1))); } catch (NumberFormatException ignored) { }
+            }
+        }
+        int n = 1;
+        while (used.contains(n)) n++;
+        return "Waypoint" + n;
     }
 
     /** Stable scope for a waypoint: separate local saves and separate multiplayer servers. */
@@ -300,7 +293,7 @@ public class WaypointsMod implements ClientModInitializer {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         BlockPos p = mc.player.blockPosition();
-        add(nextWaypointName(currentWorldId(), currentDimension()), p.getX(), p.getY(), p.getZ());
+        add(nextWaypointName(), p.getX(), p.getY(), p.getZ());
     }
 
     static void remove(Waypoint w) {
@@ -462,14 +455,12 @@ public class WaypointsMod implements ClientModInitializer {
         double fx = -Math.sin(yaw) * Math.cos(pitch);
         double fy = -Math.sin(pitch);
         double fz = Math.cos(yaw) * Math.cos(pitch);
-        double rx = Math.cos(yaw);
+        double rx = -Math.cos(yaw);
         double ry = 0;
-        double rz = Math.sin(yaw);
-        // Camera-up basis must point upward for every yaw/pitch. The previous
-        // cross-product order inverted the screen basis and caused labels to drift.
-        double ux = -Math.sin(yaw) * Math.sin(pitch);
-        double uy = Math.cos(pitch);
-        double uz = -Math.cos(yaw) * Math.sin(pitch);
+        double rz = -Math.sin(yaw);
+        double ux = ry * fz - rz * fy;
+        double uy = rz * fx - rx * fz;
+        double uz = rx * fy - ry * fx;
         double[] f = {fx, fy, fz};
         double[] r = {rx, ry, rz};
         double[] u = {ux, uy, uz};
@@ -485,7 +476,7 @@ public class WaypointsMod implements ClientModInitializer {
 
         for (Waypoint w : WAYPOINTS) {
             if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
-            if (!sameDimension(w.dimension(), dim)) continue;
+            if (!java.util.Objects.equals(normalizeDimension(w.dimension()), dim)) continue;
 
             double bx = w.x() + 0.5 - eye.x;
             double by = w.y() - eye.y;
@@ -506,8 +497,7 @@ public class WaypointsMod implements ClientModInitializer {
             double pdy = w.y() + 0.5 - playerEye.y;
             double pdz = w.z() + 0.5 - playerEye.z;
             double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
-            // Keep the marker visible when approaching from an angle. Projection below
-            // safely rejects points behind the camera; distance alone must not hide it.
+            if (dist < 2.5) continue;
 
             // Feather-style marker: colored letter icon, small name, distance with one decimal
             double dx = bx;
@@ -572,58 +562,11 @@ public class WaypointsMod implements ClientModInitializer {
         }
     }
 
-    // ---------------- Feather-style marker ----------------
-    private static final int ICON_SIZE = 11;
-    private static final int STRIP_COLOR = 0x90000000;
-
-    private static java.lang.reflect.Method M_POSE, M_PUSH, M_POP, M_TRANSLATE, M_SCALE;
-    private static boolean scaleChecked = false;
-    private static boolean scaleOk = false;
-
-    /** Text scaling uses the GUI pose stack, looked up by reflection. If that is not available, text just stays full size. */
-    private static void initScale(GuiGraphicsExtractor g) {
-        scaleChecked = true;
-        try {
-            M_POSE = g.getClass().getMethod("pose");
-            Object pose = M_POSE.invoke(g);
-            Class<?> pc = pose.getClass();
-            M_PUSH = pc.getMethod("pushMatrix");
-            M_POP = pc.getMethod("popMatrix");
-            M_TRANSLATE = pc.getMethod("translate", float.class, float.class);
-            M_SCALE = pc.getMethod("scale", float.class, float.class);
-            scaleOk = true;
-        } catch (Throwable t) {
-            scaleOk = false;
-        }
-    }
-
-    private static void drawCenteredText(GuiGraphicsExtractor g, Font font, String text, int cx, int top, float scale, int color) {
-        int w = font.width(text);
-        if (!scaleOk || scale == 1f) {
-            g.text(font, text, cx - w / 2, top, color, true);
-            return;
-        }
-        Object pose = null;
-        boolean pushed = false;
-        try {
-            pose = M_POSE.invoke(g);
-            M_PUSH.invoke(pose);
-            pushed = true;
-            M_TRANSLATE.invoke(pose, (float) cx, (float) top);
-            M_SCALE.invoke(pose, scale, scale);
-            g.text(font, text, -w / 2, 0, color, true);
-        } catch (Throwable t) {
-            scaleOk = false;
-        } finally {
-            if (pushed) {
-                try {
-                    M_POP.invoke(pose);
-                } catch (Throwable ignored) {
-                    scaleOk = false;
-                }
-            }
-        }
-    }
+    // ---------------- Crisp waypoint marker ----------------
+    // Draw the logo as simple GUI geometry and use Minecraft's normal text renderer.
+    // Avoid matrix scaling here: scaling extracted GUI text can cause glyph clipping/jitter.
+    private static final int ICON_SIZE = 13;
+    private static final int STRIP_COLOR = 0xB0000000;
 
     private static String formatDistance(double d) {
         if (d < 1000.0) return String.format(java.util.Locale.ROOT, "%.1fm", d);
@@ -631,37 +574,42 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
-        if (!scaleChecked) initScale(g);
-
-        float nameScale = scaleOk ? 0.6f : 1f;
         String distText = formatDistance(dist);
-        // Font-independent pixel pin: avoid Unicode symbols that render as corrupted glyphs
-        // with some resource packs / font mods.
+
+        // Feather-style waypoint badge: red square with a custom pixel-art white W.
+        // Drawn as GUI rectangles rather than a font glyph, so it stays crisp at every scale.
         int ix = cx - ICON_SIZE / 2;
         int iy = cy - ICON_SIZE / 2;
-        int fillColor = 0xFF000000 | rgb;
-        int white = 0xFFFFFFFF;
-        // colored square backing
-        g.fill(ix + 1, iy, ix + ICON_SIZE - 1, iy + ICON_SIZE, fillColor);
-        g.fill(ix, iy + 1, ix + ICON_SIZE, iy + ICON_SIZE - 1, fillColor);
-        // simple white waypoint flag built from rectangles only
-        g.fill(cx - 2, iy + 2, cx + 2, iy + 9, white);
-        g.fill(cx - 2, iy + 2, cx + 3, iy + 4, white);
-        g.fill(cx, iy + 4, cx + 3, iy + 6, white);
-        g.fill(cx - 2, iy + 8, cx + 2, iy + 9, white);
+        int logoRed = 0xFFFF2525;
+        g.fill(ix - 1, iy - 1, ix + ICON_SIZE + 1, iy + ICON_SIZE + 1, 0xFF202020);
+        g.fill(ix, iy, ix + ICON_SIZE, iy + ICON_SIZE, logoRed);
+        // Five-by-five bitmap W, scaled with integer-sized blocks and centered in the badge.
+        final String[] wPixels = {"10001", "10001", "10101", "10101", "01010"};
+        int pixel = 2;
+        int logoLeft = ix + (ICON_SIZE - 5 * pixel) / 2;
+        int logoTop = iy + (ICON_SIZE - 5 * pixel) / 2;
+        for (int row = 0; row < wPixels.length; row++) {
+            for (int col = 0; col < wPixels[row].length(); col++) {
+                if (wPixels[row].charAt(col) == '1') {
+                    g.fill(logoLeft + col * pixel, logoTop + row * pixel,
+                            logoLeft + (col + 1) * pixel, logoTop + (row + 1) * pixel, 0xFFFFFFFF);
+                }
+            }
+        }
 
-        // --- name: small text on a dark strip ---
-        int nameTop = iy + ICON_SIZE + 1;
-        int nameW = (int) Math.ceil(font.width(name) * nameScale);
-        int nameH = (int) Math.ceil(9 * nameScale);
-        g.fill(cx - nameW / 2 - 2, nameTop, cx - nameW / 2 + nameW + 2, nameTop + nameH + 2, STRIP_COLOR);
-        drawCenteredText(g, font, name, cx, nameTop + 1, nameScale, 0xFFFFFFFF);
+        // Keep the full name at native GUI scale for crisp text; opaque dark backing
+        // makes it readable over shaders, bright blocks, and the beam itself.
+        int nameTop = iy + ICON_SIZE + 2;
+        int nameW = font.width(name);
+        int nameH = 9;
+        int nameLeft = cx - nameW / 2;
+        g.fill(nameLeft - 3, nameTop - 1, nameLeft + nameW + 3, nameTop + nameH, STRIP_COLOR);
+        g.text(font, name, nameLeft, nameTop, 0xFFFFFFFF, true);
 
-        // --- distance: normal-size text on a dark strip ---
-        int distTop = nameTop + nameH + 2;
+        int distTop = nameTop + nameH + 1;
         int distW = font.width(distText);
-        g.fill(cx - distW / 2 - 3, distTop, cx - distW / 2 + distW + 3, distTop + 11, STRIP_COLOR);
-        g.text(font, distText, cx - distW / 2, distTop + 1, 0xFFFFFFFF, true);
+        g.fill(cx - distW / 2 - 4, distTop - 1, cx + distW / 2 + 4, distTop + 10, STRIP_COLOR);
+        g.text(font, distText, cx - distW / 2, distTop, 0xFFFFFFFF, true);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */

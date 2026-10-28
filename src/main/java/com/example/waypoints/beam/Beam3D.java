@@ -22,8 +22,8 @@ import java.util.List;
  * the mod switches itself back to the on-screen beam.
  */
 public final class Beam3D {
-    private static final int MAX_RENDERED_BEAMS = 8;
-    private static final double MAX_BEAM_DISTANCE_SQUARED = 128.0 * 128.0;
+    private static final int MAX_RENDERED_BEAMS = 24;
+    private static final double MAX_BEAM_DISTANCE_SQUARED = 192.0 * 192.0;
 
     private static volatile List<BeamState> beams = List.of();
     private static volatile boolean failed = false;

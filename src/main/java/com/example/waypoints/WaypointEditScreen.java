@@ -51,7 +51,7 @@ public class WaypointEditScreen extends Screen {
         } else {
             Minecraft mc = Minecraft.getInstance();
             BlockPos p = mc.player != null ? mc.player.blockPosition() : BlockPos.ZERO;
-            name = WaypointsMod.nextWaypointName(WaypointsMod.currentWorldId(), WaypointsMod.currentDimension());
+            name = WaypointsMod.nextWaypointName();
             x = p.getX();
             y = p.getY();
             z = p.getZ();
