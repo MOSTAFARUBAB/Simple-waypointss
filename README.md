@@ -1,3 +1,7 @@
+## 3D waypoint beams (Minecraft 26.3)
+
+The `-PwithBeam=true` build uses Minecraft 26.3's native `BeaconRenderer.submitBeaconBeam(...)` for the in-world waypoint beam, reusing the vanilla animated beacon texture and inner/outer beam rendering. The 3D-beam build has not been compiled or tested in-game in this environment, so build it with Java 25 and verify it in Minecraft before publishing.
+
 # Simple Waypoints (Fabric, Minecraft 26.3, client-side)
 
 Feather-style waypoints: colored letter icon, small name and distance (one decimal) shown through walls, plus a Minecraft-beacon-style beam: spinning solid inner beam + faint glow, hidden by blocks (3d-beam jar).
