@@ -230,7 +230,7 @@ public class WaypointsMod implements ClientModInitializer {
     /** Generate numbering independently for each server/save and dimension. */
     public static String nextWaypointName(String worldId, String dimension) {
         int max = 0;
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?i)^Waypoint\s*(\d+)$");
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(?i)^Waypoint\\s*(\\d+)$");
         for (Waypoint w : WAYPOINTS) {
             if (!java.util.Objects.equals(w.worldId(), worldId) || !java.util.Objects.equals(w.dimension(), dimension)) continue;
             java.util.regex.Matcher matcher = pattern.matcher(w.name());
