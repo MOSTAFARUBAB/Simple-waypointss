@@ -62,9 +62,14 @@ public class WaypointsMod implements ClientModInitializer {
     /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
     public static volatile boolean beam3dActive = false;
 
+    /** When true the beam is drawn on screen (stable, never vanishes) even if the 3D beam is available. /wp beam screen|world */
+    public static volatile boolean hudBeamForced = false;
+    private static final Path SCREEN_BEAM_FLAG = FabricLoader.getInstance().getConfigDir().resolve("simple-waypoints-screenbeam.flag");
+
     @Override
     public void onInitializeClient() {
         load();
+        hudBeamForced = Files.exists(SCREEN_BEAM_FLAG);
         // Try to enable the real 3D beam (only present in the "3d-beam" build). Falls back to the on-screen beam.
         try {
             Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
@@ -176,6 +181,19 @@ public class WaypointsMod implements ClientModInitializer {
                                                     feedback(ctx.getSource(), ok ? (secs == 0 ? "Waypoint is now permanent." : "Waypoint will disappear in " + secs + "s.") : "No waypoint with that name.");
                                                     return 1;
                                                 }))))
+                        .then(ClientCommands.literal("beam")
+                                .then(ClientCommands.literal("screen")
+                                        .executes(ctx -> {
+                                            setScreenBeam(true);
+                                            feedback(ctx.getSource(), "Beam is now drawn on screen (stable).");
+                                            return 1;
+                                        }))
+                                .then(ClientCommands.literal("world")
+                                        .executes(ctx -> {
+                                            setScreenBeam(false);
+                                            feedback(ctx.getSource(), beam3dActive ? "Beam is now drawn in the world (3D)." : "The 3D beam is not available in this jar, so the on-screen beam stays.");
+                                            return 1;
+                                        })))
                         .then(ClientCommands.literal("list")
                                 .executes(ctx -> {
                                     if (WAYPOINTS.isEmpty()) feedback(ctx.getSource(), "No waypoints.");
@@ -193,6 +211,16 @@ public class WaypointsMod implements ClientModInitializer {
                                     feedback(ctx.getSource(), "All waypoints cleared.");
                                     return 1;
                                 }))));
+    }
+
+    private static void setScreenBeam(boolean on) {
+        hudBeamForced = on;
+        try {
+            if (on) Files.writeString(SCREEN_BEAM_FLAG, "1");
+            else Files.deleteIfExists(SCREEN_BEAM_FLAG);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private static void feedback(FabricClientCommandSource source, String message) {
@@ -363,9 +391,19 @@ public class WaypointsMod implements ClientModInitializer {
         if (mc.player == null || mc.level == null || WAYPOINTS.isEmpty()) return;
 
         float partial = deltaTracker.getGameTimeDeltaPartialTick(false);
-        Vec3 eye = mc.player.getEyePosition(partial);
-        double yaw = Math.toRadians(mc.player.getViewYRot(partial));
-        double pitch = Math.toRadians(mc.player.getViewXRot(partial));
+        Vec3 playerEye = mc.player.getEyePosition(partial);
+        Vec3 eye = playerEye;
+        double yawDeg = mc.player.getViewYRot(partial);
+        double pitchDeg = mc.player.getViewXRot(partial);
+        // Use the real render camera when we can (Freecam, F5 and similar), so the label lines up with the beam.
+        double[] cam = cameraState(mc);
+        if (cam != null) {
+            eye = new Vec3(cam[0], cam[1], cam[2]);
+            yawDeg = cam[3];
+            pitchDeg = cam[4];
+        }
+        double yaw = Math.toRadians(yawDeg);
+        double pitch = Math.toRadians(pitchDeg);
 
         // Camera basis vectors (Minecraft: yaw 0 looks toward +Z).
         double fx = -Math.sin(yaw) * Math.cos(pitch);
@@ -400,7 +438,7 @@ public class WaypointsMod implements ClientModInitializer {
 
             // beam: fades out smoothly as you get close, so it never pops on/off
             double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
-            if (!beam3dActive && fade > 0.02) {
+            if ((!beam3dActive || hudBeamForced) && fade > 0.02) {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
@@ -414,8 +452,60 @@ public class WaypointsMod implements ClientModInitializer {
             int sy = (int) p[1];
             if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
-            double dist = Math.sqrt(bx * bx + (by + 0.5) * (by + 0.5) + bz * bz);
+            // distance is measured from the player, not from the camera
+            double pdx = w.x() + 0.5 - playerEye.x;
+            double pdy = w.y() + 0.5 - playerEye.y;
+            double pdz = w.z() + 0.5 - playerEye.z;
+            double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
             drawMarker(graphics, font, w.name(), dist, rgb, sx, sy);
+        }
+    }
+
+    // ---------------- real camera lookup (reflection, falls back to the player's view) ----------------
+    private static java.lang.reflect.Method CAM_GET, CAM_POS, CAM_YROT, CAM_XROT;
+    private static boolean camBroken = false;
+
+    private static java.lang.reflect.Method findMethod(Class<?> c, String... names) {
+        for (String n : names) {
+            try {
+                return c.getMethod(n);
+            } catch (NoSuchMethodException ignored) {
+            }
+        }
+        return null;
+    }
+
+    /** Returns {x, y, z, yawDegrees, pitchDegrees} of the camera that is actually used to draw the world, or null. */
+    private static double[] cameraState(Minecraft mc) {
+        if (camBroken) return null;
+        try {
+            Object gr = mc.gameRenderer;
+            if (CAM_GET == null) {
+                CAM_GET = findMethod(gr.getClass(), "getMainCamera", "mainCamera");
+                if (CAM_GET == null) {
+                    camBroken = true;
+                    return null;
+                }
+            }
+            Object cam = CAM_GET.invoke(gr);
+            if (cam == null) return null;
+            if (CAM_POS == null) {
+                CAM_POS = findMethod(cam.getClass(), "position", "getPosition");
+                CAM_YROT = findMethod(cam.getClass(), "yRot", "getYRot");
+                CAM_XROT = findMethod(cam.getClass(), "xRot", "getXRot");
+                if (CAM_POS == null || CAM_YROT == null || CAM_XROT == null) {
+                    camBroken = true;
+                    return null;
+                }
+            }
+            Vec3 pos = (Vec3) CAM_POS.invoke(cam);
+            float yRot = ((Number) CAM_YROT.invoke(cam)).floatValue();
+            float xRot = ((Number) CAM_XROT.invoke(cam)).floatValue();
+            if (pos == null) return null;
+            return new double[]{pos.x, pos.y, pos.z, yRot, xRot};
+        } catch (Throwable t) {
+            camBroken = true;
+            return null;
         }
     }
 

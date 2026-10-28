@@ -73,6 +73,10 @@ public final class Beam3D {
     // ---- extraction phase ----
     private static void extract(LevelExtractionContext context) {
         if (failed) return;
+        if (WaypointsMod.hudBeamForced) {
+            beams = List.of();
+            return;
+        }
         try {
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) {

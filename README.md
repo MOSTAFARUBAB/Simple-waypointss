@@ -10,6 +10,8 @@ Controls
 - /wp remove <name>
 - /wp color <name> <color>   (red green blue yellow pink cyan orange white, hex like ff8800, or chroma = rainbow)
 - /wp expire <name> <seconds> (0 = permanent)
+- /wp beam screen   (beam drawn on screen: never vanishes)
+- /wp beam world    (real 3D beam, only in the 3d-beam jar)
 - /wp list
 - /wp clear
 Saved to .minecraft/config/simple-waypoints.json
