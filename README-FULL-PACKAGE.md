@@ -1,24 +1,16 @@
-# Simple Waypoints — Vanilla Beacon Beam package
+# Simple Waypoints — Vanilla Beacon Beam build
 
-This is the full source project for Minecraft Java 26.3 + Fabric. The `Beam3D.java` source calls Minecraft's native `BeaconRenderer.submitBeaconBeam(...)` so the waypoint beam uses the vanilla beacon texture/animation instead of the old custom solid geometry.
+This workflow is configured to build **only the 3D-beam variant**. It does not create a separate basic-build artifact.
 
-## Build the installable mod on Windows
+## Download the correct mod from GitHub Actions
 
-1. Install/use **Java 25** and Gradle 9.6+ (or open this project in an IDE that has a compatible Gradle setup).
-2. Extract the entire ZIP to a normal folder.
-3. Double-click `BUILD-3D-BEAM-WINDOWS.bat`.
-4. Wait for `BUILD SUCCESSFUL`.
-5. The script copies the 3D-beam JAR into `READY-TO-INSTALL`.
-6. Copy that JAR into `.minecraft/mods` and remove older `simple-waypoints` JARs first. Keep Fabric API installed.
+1. Push this project to GitHub.
+2. Open the repository's **Actions** tab.
+3. Open the latest **Build Simple Waypoints - Vanilla Beacon Beam** run.
+4. Confirm the job named `beam3d` is green.
+5. In the run's **Artifacts** section, download **`simple-waypoints-3d-beam`**.
+6. Extract that artifact and put the normal `.jar` into Minecraft's `mods` folder. Remove older Simple Waypoints JARs first.
 
-If Windows says Gradle is missing, open a terminal in this folder and run:
+If the workflow fails, open the `beam3d` job and send the error log. This workflow now fails visibly if the beam build fails or if the expected JAR is missing.
 
-```bat
-gradle clean build -PwithBeam=true
-```
-
-Then select the normal `*-3d-beam-*.jar` from `build/libs` (not a `sources` JAR).
-
-## Important
-
-The ZIP contains source and a build helper, not a precompiled JAR. This environment cannot compile Minecraft 26.3 because it only has Java 21 and no Gradle installation. The build script is intended to produce the installable JAR on your Java 25/Gradle setup. The native rendering change still needs an in-game visual check.
+Note: This package contains source code and a GitHub Actions workflow; it is not a precompiled mod JAR. The rendering still needs in-game verification.
