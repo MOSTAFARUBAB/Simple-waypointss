@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -64,45 +63,9 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile boolean beam3dActive = false;
 
 
-    /** Beam width multiplier (1.0 = default, about 7 pixels on screen at any distance). /wp beam width <0.4-5> */
-    public static volatile float beamWidth = 1.0f;
-    private static final Path SETTINGS_FILE = FabricLoader.getInstance().getConfigDir().resolve("simple-waypoints-settings.properties");
-
-    /** Wanted on-screen beam width in pixels. */
-    public static double beamPixels() {
-        return 7.0 * beamWidth;
-    }
-
-    private static void loadSettings() {
-        try {
-            if (Files.exists(SETTINGS_FILE)) {
-                java.util.Properties pr = new java.util.Properties();
-                try (var in = Files.newInputStream(SETTINGS_FILE)) {
-                    pr.load(in);
-                }
-                beamWidth = Math.max(0.4f, Math.min(5f, Float.parseFloat(pr.getProperty("beamWidth", "1.0"))));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static void saveSettings() {
-        try {
-            java.util.Properties pr = new java.util.Properties();
-            pr.setProperty("beamWidth", Float.toString(beamWidth));
-            try (var out = Files.newOutputStream(SETTINGS_FILE)) {
-                pr.store(out, "Simple Waypoints settings");
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
     @Override
     public void onInitializeClient() {
         load();
-        loadSettings();
         // Try to enable the real 3D beam (only present in the "3d-beam" build). Falls back to the on-screen beam.
         try {
             Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
@@ -212,15 +175,6 @@ public class WaypointsMod implements ClientModInitializer {
                                                     long at = secs == 0 ? 0L : System.currentTimeMillis() + secs * 1000L;
                                                     boolean ok = update(n, w -> new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(), w.dimension(), at));
                                                     feedback(ctx.getSource(), ok ? (secs == 0 ? "Waypoint is now permanent." : "Waypoint will disappear in " + secs + "s.") : "No waypoint with that name.");
-                                                    return 1;
-                                                }))))
-                        .then(ClientCommands.literal("beam")
-                                .then(ClientCommands.literal("width")
-                                        .then(ClientCommands.argument("value", FloatArgumentType.floatArg(0.4f, 5.0f))
-                                                .executes(ctx -> {
-                                                    beamWidth = FloatArgumentType.getFloat(ctx, "value");
-                                                    saveSettings();
-                                                    feedback(ctx.getSource(), "Beam width set to " + beamWidth + " (1.0 = default, bigger = thicker).");
                                                     return 1;
                                                 }))))
                         .then(ClientCommands.literal("list")
@@ -658,7 +612,7 @@ public class WaypointsMod implements ClientModInitializer {
         double yB = b[1];
 
         if (Math.abs(yB - yA) < 1.0) {
-            double hw = Math.max(3.0 * beamWidth, CORE_HALF_WIDTH_BLOCKS * beamWidth * pxPerInvDepth * invA);
+            double hw = Math.max(3.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
             int cx = (int) a[0];
             int cy = (int) yA;
             g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(1.0 * fade, rgb));
@@ -675,7 +629,7 @@ public class WaypointsMod implements ClientModInitializer {
             double inv = invA + frac * (invB - invA);
 
             // soft glow first, bright core on top
-            double bw = beamWidth;
+            double bw = 1.0;
             double coreHalf = Math.max(3.0 * bw, CORE_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
             double glowHalf = Math.max(7.0 * bw, GLOW_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
             drawRowSpan(g, sx, sy, step, glowHalf, 0.18 * fade, rgb, sw);
