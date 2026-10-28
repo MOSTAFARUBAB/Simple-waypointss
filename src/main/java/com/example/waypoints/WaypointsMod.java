@@ -67,8 +67,8 @@ public class WaypointsMod implements ClientModInitializer {
     /** 0=normal, 1=thick, 2=extra thick. */
     public static volatile int beamThickness = 1;
 
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.16f : beamThickness == 1 ? 0.22f : 0.30f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.55f : beamThickness == 1 ? 0.80f : 1.10f; }
 
 
     @Override
@@ -221,10 +221,34 @@ public class WaypointsMod implements ClientModInitializer {
     /** Waypoints for the current save/server, optionally across dimensions for the menu. */
     public static List<Waypoint> waypointsForDimension(String dimensionFilter) {
         String worldId = currentWorldId();
+        String requested = normalizeDimension(dimensionFilter);
         return WAYPOINTS.stream()
                 .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
-                .filter(w -> "all".equals(dimensionFilter) || java.util.Objects.equals(w.dimension(), dimensionFilter))
+                .filter(w -> "all".equals(dimensionFilter) || sameDimension(w.dimension(), requested))
                 .toList();
+    }
+
+    /**
+     * Minecraft 26.3 can stringify a dimension key as
+     * "ResourceKey[minecraft:dimension / minecraft:overworld]" rather than
+     * just "minecraft:overworld". Normalize both forms so saved waypoints,
+     * the menu selector and rendering all agree.
+     */
+    private static String normalizeDimension(String raw) {
+        if (raw == null || raw.isBlank()) return "unknown";
+        String value = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (value.contains("minecraft:overworld")) return "minecraft:overworld";
+        if (value.contains("minecraft:the_nether")) return "minecraft:the_nether";
+        if (value.contains("minecraft:the_end")) return "minecraft:the_end";
+        int slash = value.lastIndexOf('/');
+        if (slash >= 0) value = value.substring(slash + 1);
+        value = value.replace("]", "").replace(")", "").trim();
+        if (value.startsWith("resourcekey[")) return "unknown";
+        return value;
+    }
+
+    public static boolean sameDimension(String a, String b) {
+        return java.util.Objects.equals(normalizeDimension(a), normalizeDimension(b));
     }
 
     /** Generate numbering independently for each server/save and dimension. */
@@ -244,7 +268,7 @@ public class WaypointsMod implements ClientModInitializer {
 
     public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.level != null ? mc.level.dimension().toString() : "unknown";
+        return mc.level != null ? normalizeDimension(mc.level.dimension().toString()) : "unknown";
     }
 
     /** Stable scope for a waypoint: separate local saves and separate multiplayer servers. */
@@ -458,7 +482,7 @@ public class WaypointsMod implements ClientModInitializer {
 
         for (Waypoint w : WAYPOINTS) {
             if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
-            if (!w.dimension().equals(dim)) continue;
+            if (!sameDimension(w.dimension(), dim)) continue;
 
             double bx = w.x() + 0.5 - eye.x;
             double by = w.y() - eye.y;
@@ -608,7 +632,8 @@ public class WaypointsMod implements ClientModInitializer {
 
         float nameScale = scaleOk ? 0.6f : 1f;
         String distText = formatDistance(dist);
-        String letter = name.isEmpty() ? "W" : new String(Character.toChars(Character.toUpperCase(name.codePointAt(0))));
+        // Use a consistent waypoint-pin diamond instead of changing the icon with the name.
+        String letter = "◆";
 
         // --- icon: rounded colored square with the first letter ---
         int ix = cx - ICON_SIZE / 2;
