@@ -22,8 +22,8 @@ import java.util.List;
  * the mod switches itself back to the on-screen beam.
  */
 public final class Beam3D {
-    private static final float BEAM_INNER_RADIUS = 0.2f;
-    private static final float BEAM_OUTER_RADIUS = 0.25f;
+    private static final int MAX_RENDERED_BEAMS = 24;
+    private static final double MAX_BEAM_DISTANCE_SQUARED = 192.0 * 192.0;
 
     private static volatile List<BeamState> beams = List.of();
     private static volatile boolean failed = false;
@@ -59,16 +59,17 @@ public final class Beam3D {
             String dim = WaypointsMod.currentDimension();
             String worldId = WaypointsMod.currentWorldId();
             List<BeamState> out = new ArrayList<>();
-            for (Waypoint w : WaypointsMod.waypoints()) {
-                if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
-                if (!w.dimension().equals(dim)) continue;
-
+            if (!WaypointsMod.showWaypointBeams) {
+                beams = List.of();
+                return;
+            }
+            for (Waypoint w : WaypointsMod.currentContextWaypoints()) {
                 double dx = w.x() + 0.5 - eye.x;
                 double dz = w.z() + 0.5 - eye.z;
-                double horiz = Math.sqrt(dx * dx + dz * dz);
-                if (horiz <= 0.5) continue;
+                double distanceSquared = dx * dx + dz * dz;
+                if (distanceSquared <= 0.25 || distanceSquared > MAX_BEAM_DISTANCE_SQUARED) continue;
+                if (out.size() >= MAX_RENDERED_BEAMS) break;
 
-                // Keep the vanilla beacon's real-world beam dimensions rather than widening a custom mesh.
                 int color = WaypointsMod.resolveColor(w) & 0x00FFFFFF;
                 // Store the waypoint's horizontal position; the native beacon beam will
                 // be drawn from the world's minimum build height through its maximum.
@@ -115,8 +116,8 @@ public final class Beam3D {
                         0,
                         fullWorldHeight,
                         argb,
-                        BEAM_INNER_RADIUS,
-                        BEAM_OUTER_RADIUS
+                        WaypointsMod.beamInnerRadius(),
+                        WaypointsMod.beamOuterRadius()
                 );
                 matrices.popPose();
             }

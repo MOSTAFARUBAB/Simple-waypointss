@@ -62,6 +62,13 @@ public class WaypointsMod implements ClientModInitializer {
 
     /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
     public static volatile boolean beam3dActive = false;
+    public static volatile boolean showWaypointLabels = true;
+    public static volatile boolean showWaypointBeams = true;
+    /** 0=normal, 1=thick, 2=extra thick. */
+    public static volatile int beamThickness = 1;
+
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
 
 
     @Override
@@ -438,11 +445,20 @@ public class WaypointsMod implements ClientModInitializer {
             double horiz = Math.sqrt(bx * bx + bz * bz);
             int rgb = resolveColor(w);
 
-            // beam: fades out smoothly as you get close, so it never pops on/off
+            // Keep nearby waypoint beams hidden to avoid a huge beam obscuring the view.
             double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
-            if (!beam3dActive && fade > 0.02) {
+            if (showWaypointBeams && !beam3dActive && fade > 0.02) {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
+
+            // Labels can be disabled from the waypoint menu. Hide the marker when standing
+            // almost on top of the waypoint; this prevents the oversized close-up label seen in-game.
+            if (!showWaypointLabels) continue;
+            double pdx = w.x() + 0.5 - playerEye.x;
+            double pdy = w.y() + 0.5 - playerEye.y;
+            double pdz = w.z() + 0.5 - playerEye.z;
+            double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
+            if (dist < 2.5) continue;
 
             // Feather-style marker: colored letter icon, small name, distance with one decimal
             double dx = bx;
@@ -455,10 +471,6 @@ public class WaypointsMod implements ClientModInitializer {
             if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
             // distance is measured from the player, not from the camera
-            double pdx = w.x() + 0.5 - playerEye.x;
-            double pdy = w.y() + 0.5 - playerEye.y;
-            double pdz = w.z() + 0.5 - playerEye.z;
-            double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
             drawMarker(graphics, font, w.name(), dist, rgb, sx, sy);
         }
     }

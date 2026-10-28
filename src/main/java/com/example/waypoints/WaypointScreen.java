@@ -12,7 +12,7 @@ import java.util.List;
 public class WaypointScreen extends Screen {
     private static final int PER_PAGE = 6;
     private static final int ROW_H = 24;
-    private static final int TOP = 56;
+    private static final int TOP = 82;
 
     private final int page;
 
@@ -50,6 +50,19 @@ public class WaypointScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("+ New Waypoint"),
                 btn -> Minecraft.getInstance().gui.setScreen(new WaypointEditScreen(null, p)))
                 .bounds(cx - 160, 28, 110, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Labels: " + (WaypointsMod.showWaypointLabels ? "ON" : "OFF")), btn -> {
+            WaypointsMod.showWaypointLabels = !WaypointsMod.showWaypointLabels;
+            open(p);
+        }).bounds(cx - 42, 54, 82, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Beams: " + (WaypointsMod.showWaypointBeams ? "ON" : "OFF")), btn -> {
+            WaypointsMod.showWaypointBeams = !WaypointsMod.showWaypointBeams;
+            open(p);
+        }).bounds(cx + 44, 54, 82, 20).build());
+        String thicknessName = WaypointsMod.beamThickness == 0 ? "Normal" : WaypointsMod.beamThickness == 1 ? "Thick" : "Extra Thick";
+        this.addRenderableWidget(Button.builder(Component.literal("Width: " + thicknessName), btn -> {
+            WaypointsMod.beamThickness = (WaypointsMod.beamThickness + 1) % 3;
+            open(p);
+        }).bounds(cx - 160, 54, 110, 20).build());
 
         for (int i = start; i < end; i++) {
             final Waypoint w = all.get(i);
@@ -85,7 +98,7 @@ public class WaypointScreen extends Screen {
 
         int cx = this.width / 2;
         graphics.text(this.font, "Waypoints  (page " + (currentPage() + 1) + "/" + pages() + ")",
-                cx - 40, 34, 0xFFFFFFFF, true);
+                cx + 5, 34, 0xFFFFFFFF, true);
 
         List<Waypoint> all = WaypointsMod.currentContextWaypoints();
         if (all.isEmpty()) {
