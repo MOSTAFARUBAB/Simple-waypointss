@@ -254,10 +254,25 @@ public class WaypointsMod implements ClientModInitializer {
      */
     private static void migrateLegacyWorldIds(String activeWorldId) {
         if (activeWorldId == null || activeWorldId.equals("unknown")) return;
+        String oldSingleplayerId = null;
+        Minecraft mc = Minecraft.getInstance();
+        // Earlier builds used the displayed save name as the ID. Migrate that old ID once
+        // to the real save-folder ID, so existing waypoints don't remain globally shared.
+        if (mc.getCurrentServer() == null && mc.getSingleplayerServer() != null) {
+            try {
+                String levelName = mc.getSingleplayerServer().getWorldData().getLevelName();
+                if (levelName != null && !levelName.isBlank()) oldSingleplayerId = "singleplayer:" + levelName.trim();
+            } catch (Throwable ignored) { }
+        }
         boolean changed = false;
         for (int i = 0; i < WAYPOINTS.size(); i++) {
             Waypoint w = WAYPOINTS.get(i);
-            if (w.worldId() == null || w.worldId().isBlank() || w.worldId().equals("unknown")) {
+            String existingId = w.worldId();
+            boolean unassigned = existingId == null || existingId.isBlank() || existingId.equals("unknown");
+            boolean oldNameBasedId = oldSingleplayerId != null
+                    && existingId != null
+                    && (existingId.equals(oldSingleplayerId) || existingId.startsWith("singleplayer-name:"));
+            if (unassigned || oldNameBasedId) {
                 WAYPOINTS.set(i, new Waypoint(w.name(), w.x(), w.y(), w.z(), w.color(),
                         normalizeDimension(w.dimension()), w.expiresAt(), activeWorldId));
                 changed = true;
@@ -359,20 +374,93 @@ public class WaypointsMod implements ClientModInitializer {
         return "Waypoint" + n;
     }
 
-    /** Stable scope for a waypoint: separate local saves and separate multiplayer servers. */
+    /** Stable scope for a waypoint: separate local save folders and multiplayer servers.
+     * A world's display name is NOT unique (two saves can both be named "New World"),
+     * so singleplayer identity is taken from the save-folder ID via reflection to avoid
+     * hard-coding version-sensitive Minecraft storage API names.
+     */
     public static String currentWorldId() {
         Minecraft mc = Minecraft.getInstance();
         ServerData server = mc.getCurrentServer();
         if (server != null && server.ip != null && !server.ip.isBlank()) {
-            return "server:" + server.ip.trim().toLowerCase(java.util.Locale.ROOT);
+            return "server:" + normalizeServerAddress(server.ip);
         }
-        if (mc.getSingleplayerServer() != null) {
-            String levelName = mc.getSingleplayerServer().getWorldData().getLevelName();
-            if (levelName != null && !levelName.isBlank()) {
-                return "singleplayer:" + levelName.trim();
+        Object integratedServer = mc.getSingleplayerServer();
+        if (integratedServer != null) {
+            String saveId = findSingleplayerSaveId(integratedServer);
+            if (saveId != null && !saveId.isBlank()) {
+                return "singleplayer-save:" + saveId;
             }
+            // Last-resort fallback only; display names can collide, but this is better than
+            // returning unknown and mixing every local save together.
+            try {
+                String levelName = mc.getSingleplayerServer().getWorldData().getLevelName();
+                if (levelName != null && !levelName.isBlank()) {
+                    return "singleplayer-name:" + levelName.trim();
+                }
+            } catch (Throwable ignored) { }
         }
         return "unknown";
+    }
+
+    private static String normalizeServerAddress(String address) {
+        return address.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", "");
+    }
+
+    /** Discover the actual singleplayer save directory/ID without relying on unstable mapped names. */
+    private static String findSingleplayerSaveId(Object integratedServer) {
+        try {
+            Object storage = invokeNoArg(integratedServer, "getStorageSource", "getStorageAccess", "getLevelStorage");
+            if (storage == null) {
+                for (Class<?> c = integratedServer.getClass(); c != null && storage == null; c = c.getSuperclass()) {
+                    for (java.lang.reflect.Field field : c.getDeclaredFields()) {
+                        String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+                        if (!name.contains("storage") && !name.contains("levelsource")) continue;
+                        try {
+                            field.setAccessible(true);
+                            Object candidate = field.get(integratedServer);
+                            if (candidate != null) { storage = candidate; break; }
+                        } catch (Throwable ignored) { }
+                    }
+                }
+            }
+            if (storage != null) {
+                Object id = invokeNoArg(storage, "getLevelId", "getLevelDirectory", "getLevelPath", "getWorldPath");
+                if (id instanceof Path path) return path.toAbsolutePath().normalize().toString();
+                if (id != null && !id.toString().isBlank()) return id.toString();
+                for (Class<?> c = storage.getClass(); c != null; c = c.getSuperclass()) {
+                    for (java.lang.reflect.Field field : c.getDeclaredFields()) {
+                        String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+                        if (!name.contains("levelid") && !name.contains("leveldirectory") && !name.contains("path")) continue;
+                        try {
+                            field.setAccessible(true);
+                            Object value = field.get(storage);
+                            if (value instanceof Path path) return path.toAbsolutePath().normalize().toString();
+                            if (value != null && !value.toString().isBlank()) return value.toString();
+                        } catch (Throwable ignored) { }
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    private static Object invokeNoArg(Object target, String... names) {
+        if (target == null) return null;
+        for (String name : names) {
+            for (Class<?> c = target.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    java.lang.reflect.Method method = c.getDeclaredMethod(name);
+                    method.setAccessible(true);
+                    return method.invoke(target);
+                } catch (Throwable ignored) { }
+            }
+            try {
+                java.lang.reflect.Method method = target.getClass().getMethod(name);
+                return method.invoke(target);
+            } catch (Throwable ignored) { }
+        }
+        return null;
     }
 
     static void add(String name, int x, int y, int z) {
