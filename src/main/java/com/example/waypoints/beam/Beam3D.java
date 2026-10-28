@@ -84,6 +84,10 @@ public final class Beam3D {
                 return;
             }
             Vec3 eye = mc.player.getEyePosition();
+            double[] cam = WaypointsMod.cameraState(mc);
+            if (cam != null) eye = new Vec3(cam[0], cam[1], cam[2]);
+            double fovRad = Math.toRadians(mc.options.fov().get());
+            double screenH = Math.max(1, mc.getWindow().getHeight());
             String dim = WaypointsMod.currentDimension();
             List<BeamState> out = new ArrayList<>();
             for (Waypoint w : WaypointsMod.waypoints()) {
@@ -95,9 +99,10 @@ public final class Beam3D {
                 double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
                 if (fade <= 0.02) continue;
 
-                // keep far beams visible: widen them a little with distance
-                float core = (float) Math.max(0.13, horiz * 0.004);
-                float glow = core * 2.4f;
+                // keep the beam about the same thickness on screen at any distance (no thin shimmering line)
+                double fromPixels = horiz * 2.0 * Math.tan(fovRad / 2.0) * (WaypointsMod.beamPixels() * 0.5) / screenH;
+                float core = (float) Math.max(0.22 * WaypointsMod.beamWidth, fromPixels);
+                float glow = core * 3.2f;
 
                 int c = WaypointsMod.resolveColor(w);
                 float r = ((c >> 16) & 0xFF) / 255f;
@@ -137,9 +142,12 @@ public final class Beam3D {
                 float x = (float) s.x();
                 float y = (float) s.y();
                 float z = (float) s.z();
-                // soft glow first, bright core on top
+                // outer glow, middle layer, then the bright core on top (all drawn through blocks)
+                float mid = s.core() * 1.8f;
                 box(pose, builder, x - s.glow(), y, z - s.glow(), x + s.glow(), y + BEAM_HEIGHT, z + s.glow(),
-                        s.r(), s.g(), s.b(), 0.15f * s.fade());
+                        s.r(), s.g(), s.b(), 0.14f * s.fade());
+                box(pose, builder, x - mid, y, z - mid, x + mid, y + BEAM_HEIGHT, z + mid,
+                        s.r(), s.g(), s.b(), 0.32f * s.fade());
                 box(pose, builder, x - s.core(), y, z - s.core(), x + s.core(), y + BEAM_HEIGHT, z + s.core(),
                         s.r(), s.g(), s.b(), 1.0f * s.fade());
             }

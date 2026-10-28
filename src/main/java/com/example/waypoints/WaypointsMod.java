@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -64,12 +65,48 @@ public class WaypointsMod implements ClientModInitializer {
 
     /** When true the beam is drawn on screen (stable, never vanishes) even if the 3D beam is available. /wp beam screen|world */
     public static volatile boolean hudBeamForced = false;
-    private static final Path SCREEN_BEAM_FLAG = FabricLoader.getInstance().getConfigDir().resolve("simple-waypoints-screenbeam.flag");
+
+    /** Beam width multiplier (1.0 = default, about 7 pixels on screen at any distance). /wp beam width <0.4-5> */
+    public static volatile float beamWidth = 1.0f;
+    private static final Path SETTINGS_FILE = FabricLoader.getInstance().getConfigDir().resolve("simple-waypoints-settings.properties");
+
+    /** Wanted on-screen beam width in pixels. */
+    public static double beamPixels() {
+        return 7.0 * beamWidth;
+    }
+
+    private static void loadSettings() {
+        try {
+            if (Files.exists(SETTINGS_FILE)) {
+                java.util.Properties pr = new java.util.Properties();
+                try (var in = Files.newInputStream(SETTINGS_FILE)) {
+                    pr.load(in);
+                }
+                hudBeamForced = Boolean.parseBoolean(pr.getProperty("screenBeam", "false"));
+                beamWidth = Math.max(0.4f, Math.min(5f, Float.parseFloat(pr.getProperty("beamWidth", "1.0"))));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void saveSettings() {
+        try {
+            java.util.Properties pr = new java.util.Properties();
+            pr.setProperty("screenBeam", Boolean.toString(hudBeamForced));
+            pr.setProperty("beamWidth", Float.toString(beamWidth));
+            try (var out = Files.newOutputStream(SETTINGS_FILE)) {
+                pr.store(out, "Simple Waypoints settings");
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     @Override
     public void onInitializeClient() {
         load();
-        hudBeamForced = Files.exists(SCREEN_BEAM_FLAG);
+        loadSettings();
         // Try to enable the real 3D beam (only present in the "3d-beam" build). Falls back to the on-screen beam.
         try {
             Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
@@ -188,6 +225,14 @@ public class WaypointsMod implements ClientModInitializer {
                                             feedback(ctx.getSource(), "Beam is now drawn on screen (stable).");
                                             return 1;
                                         }))
+                                .then(ClientCommands.literal("width")
+                                        .then(ClientCommands.argument("value", FloatArgumentType.floatArg(0.4f, 5.0f))
+                                                .executes(ctx -> {
+                                                    beamWidth = FloatArgumentType.getFloat(ctx, "value");
+                                                    saveSettings();
+                                                    feedback(ctx.getSource(), "Beam width set to " + beamWidth + " (1.0 = default, bigger = thicker).");
+                                                    return 1;
+                                                })))
                                 .then(ClientCommands.literal("world")
                                         .executes(ctx -> {
                                             setScreenBeam(false);
@@ -215,12 +260,7 @@ public class WaypointsMod implements ClientModInitializer {
 
     private static void setScreenBeam(boolean on) {
         hudBeamForced = on;
-        try {
-            if (on) Files.writeString(SCREEN_BEAM_FLAG, "1");
-            else Files.deleteIfExists(SCREEN_BEAM_FLAG);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        saveSettings();
     }
 
     private static void feedback(FabricClientCommandSource source, String message) {
@@ -383,8 +423,8 @@ public class WaypointsMod implements ClientModInitializer {
 
     // ---------------- HUD rendering (beam + label) ----------------
     private static final double BEAM_HEIGHT = 320.0;
-    private static final double CORE_HALF_WIDTH_BLOCKS = 0.16;
-    private static final double GLOW_HALF_WIDTH_BLOCKS = 0.38;
+    private static final double CORE_HALF_WIDTH_BLOCKS = 0.22;
+    private static final double GLOW_HALF_WIDTH_BLOCKS = 0.6;
 
     private static void renderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
@@ -476,7 +516,7 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     /** Returns {x, y, z, yawDegrees, pitchDegrees} of the camera that is actually used to draw the world, or null. */
-    private static double[] cameraState(Minecraft mc) {
+    public static double[] cameraState(Minecraft mc) {
         if (camBroken) return null;
         try {
             Object gr = mc.gameRenderer;
@@ -639,7 +679,7 @@ public class WaypointsMod implements ClientModInitializer {
         double yB = b[1];
 
         if (Math.abs(yB - yA) < 1.0) {
-            double hw = Math.max(2.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
+            double hw = Math.max(3.0 * beamWidth, CORE_HALF_WIDTH_BLOCKS * beamWidth * pxPerInvDepth * invA);
             int cx = (int) a[0];
             int cy = (int) yA;
             g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(1.0 * fade, rgb));
@@ -655,9 +695,12 @@ public class WaypointsMod implements ClientModInitializer {
             double inv = invA + frac * (invB - invA);
 
             // soft glow first, bright core on top
-            double glowHalf = Math.max(2.5, GLOW_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
-            double coreHalf = Math.max(1.4, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
-            drawRowSpan(g, sx, sy, glowHalf, 0.18 * fade, rgb, sw);
+            double bw = beamWidth;
+            double coreHalf = Math.max(3.0 * bw, CORE_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
+            double midHalf = coreHalf * 1.8;
+            double glowHalf = Math.max(7.0 * bw, GLOW_HALF_WIDTH_BLOCKS * bw * pxPerInvDepth * inv);
+            drawRowSpan(g, sx, sy, glowHalf, 0.14 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, midHalf, 0.32 * fade, rgb, sw);
             drawRowSpan(g, sx, sy, coreHalf, 1.0 * fade, rgb, sw);
         }
     }

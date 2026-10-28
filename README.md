@@ -12,6 +12,7 @@ Controls
 - /wp expire <name> <seconds> (0 = permanent)
 - /wp beam screen   (beam drawn on screen: never vanishes)
 - /wp beam world    (real 3D beam, only in the 3d-beam jar)
+- /wp beam width <0.4-5>  (1.0 = default, bigger = thicker beam; saved)
 - /wp list
 - /wp clear
 Saved to .minecraft/config/simple-waypoints.json
