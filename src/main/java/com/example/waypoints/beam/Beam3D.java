@@ -2,16 +2,31 @@ package com.example.waypoints.beam;
 
 import com.example.waypoints.Waypoint;
 import com.example.waypoints.WaypointsMod;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.blockentity.BeaconRenderer;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.StagedVertexBuffer;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalDouble;
 
 /**
  * Real 3D waypoint beams, drawn inside the world (through walls) so they never flicker or drift
@@ -22,9 +37,18 @@ import java.util.List;
  * the mod switches itself back to the on-screen beam.
  */
 public final class Beam3D {
-    private static final int BEAM_HEIGHT = 512;
-    private static final float BEAM_INNER_RADIUS = 0.2f;
-    private static final float BEAM_OUTER_RADIUS = 0.25f;
+    private static final float BEAM_HEIGHT = 512f;
+
+    private static final RenderPipeline PIPELINE = RenderPipelines.register(
+            RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
+                    .withLocation(Identifier.fromNamespaceAndPath(WaypointsMod.MOD_ID, "pipeline/beam_depth_tested"))
+                    .build());
+
+    private static final Vector4f COLOR_MODULATOR = new Vector4f(1f, 1f, 1f, 1f);
+    private static final Vector3f MODEL_OFFSET = new Vector3f();
+    private static final Matrix4f TEXTURE_MATRIX = new Matrix4f();
+    private static final StagedVertexBuffer STAGED_BUFFER =
+            new StagedVertexBuffer(() -> "Waypoint Beams Buffer", RenderType.SMALL_BUFFER_SIZE);
 
     private static volatile List<BeamState> beams = List.of();
     private static volatile boolean failed = false;
@@ -57,6 +81,8 @@ public final class Beam3D {
             Vec3 eye = mc.player.getEyePosition();
             double[] cam = WaypointsMod.cameraState(mc);
             if (cam != null) eye = new Vec3(cam[0], cam[1], cam[2]);
+            double fovRad = Math.toRadians(mc.options.fov().get());
+            double screenH = Math.max(1, mc.getWindow().getHeight());
             String dim = WaypointsMod.currentDimension();
             List<BeamState> out = new ArrayList<>();
             for (Waypoint w : WaypointsMod.waypoints()) {
@@ -65,11 +91,19 @@ public final class Beam3D {
                 double dx = w.x() + 0.5 - eye.x;
                 double dz = w.z() + 0.5 - eye.z;
                 double horiz = Math.sqrt(dx * dx + dz * dz);
-                if (horiz <= 0.5) continue;
+                double fade = Math.max(0.0, Math.min(1.0, (horiz - 0.5) / 1.0));
+                if (fade <= 0.02) continue;
 
-                // Keep the vanilla beacon's real-world beam dimensions rather than widening a custom mesh.
-                int color = WaypointsMod.resolveColor(w) & 0x00FFFFFF;
-                out.add(new BeamState(w.x() + 0.5, w.y(), w.z() + 0.5, color));
+                // exact beacon size (inner beam radius 0.2, glow radius 0.25); only widened far away so it never becomes a hairline
+                double fromPixels = horiz * 2.0 * Math.tan(fovRad / 2.0) * (4.0 * 0.5) / screenH;
+                float core = (float) Math.max(0.2, fromPixels);
+                float glow = core * 1.25f;
+
+                int c = WaypointsMod.resolveColor(w);
+                float r = ((c >> 16) & 0xFF) / 255f;
+                float g = ((c >> 8) & 0xFF) / 255f;
+                float b = (c & 0xFF) / 255f;
+                out.add(new BeamState(w.x() + 0.5, w.y(), w.z() + 0.5, r, g, b, core, glow, (float) fade));
             }
             beams = List.copyOf(out);
         } catch (Throwable t) {
@@ -84,36 +118,97 @@ public final class Beam3D {
             List<BeamState> states = beams;
             if (states.isEmpty()) return;
 
-            Vec3 camera = context.levelState().cameraRenderState.pos;
-            PoseStack matrices = context.poseStack();
-            // Use the same vanilla renderer used by beacon blocks. This preserves the native
-            // animated texture, scrolling UVs, inner beam, and translucent outer glow.
-            float animationTime = (System.currentTimeMillis() % 3_600_000L) / 50.0f;
-            var collector = context.submitNodeCollector();
+            RenderPipeline pipeline = PIPELINE;
+            var formatBinding = pipeline.getVertexFormatBinding(0);
+            PrimitiveTopology primitive = pipeline.getPrimitiveTopology();
+            var draw = STAGED_BUFFER.appendDraw(
+                    formatBinding, primitive,
+                    primitive == PrimitiveTopology.QUADS ? RenderSystem.getProjectionType().vertexSorting() : null);
 
-            for (BeamState beam : states) {
-                matrices.pushPose();
-                matrices.translate(beam.x() - camera.x, beam.y() - camera.y, beam.z() - camera.z);
-                int argb = 0xFF000000 | beam.rgb();
-                BeaconRenderer.submitBeaconBeam(
-                        matrices,
-                        collector,
-                        BeaconRenderer.BEAM_LOCATION,
-                        1.0f,
-                        animationTime,
-                        0,
-                        BEAM_HEIGHT,
-                        argb,
-                        BEAM_INNER_RADIUS,
-                        BEAM_OUTER_RADIUS
-                );
-                matrices.popPose();
+            PoseStack matrices = context.poseStack();
+            Vec3 camera = context.levelState().cameraRenderState.pos;
+
+            matrices.pushPose();
+            matrices.translate(-camera.x, -camera.y, -camera.z);
+
+            VertexConsumer builder = STAGED_BUFFER.getVertexBuilder(draw);
+            Matrix4fc pose = matrices.last().pose();
+            // same animation clock as the vanilla beacon: 0..40 "ticks", spin = time * 2.25 - 45 degrees
+            float time = (System.currentTimeMillis() % 2000L) / 50f;
+            double spin = Math.toRadians(time * 2.25f - 45f);
+            for (BeamState s : states) {
+                float x = (float) s.x();
+                float y = (float) s.y();
+                float z = (float) s.z();
+                float top = y + BEAM_HEIGHT;
+
+                // inner beam: a spinning diamond, fully solid
+                float rad = s.core();
+                for (int k = 0; k < 4; k++) {
+                    double a0 = spin + k * (Math.PI / 2.0);
+                    double a1 = a0 + Math.PI / 2.0;
+                    float x0 = x + (float) (Math.cos(a0) * rad);
+                    float z0 = z + (float) (Math.sin(a0) * rad);
+                    float x1 = x + (float) (Math.cos(a1) * rad);
+                    float z1 = z + (float) (Math.sin(a1) * rad);
+                    wall(pose, builder, x1, z1, x0, z0, y, top, s.r(), s.g(), s.b(), s.fade());
+                }
+
+                // outer glow: four faint walls (alpha 0.125 like the beacon)
+                float gr = s.glow();
+                float ga = 0.125f * s.fade();
+                wall(pose, builder, x - gr, z + gr, x + gr, z + gr, y, top, s.r(), s.g(), s.b(), ga);
+                wall(pose, builder, x + gr, z + gr, x + gr, z - gr, y, top, s.r(), s.g(), s.b(), ga);
+                wall(pose, builder, x + gr, z - gr, x - gr, z - gr, y, top, s.r(), s.g(), s.b(), ga);
+                wall(pose, builder, x - gr, z - gr, x - gr, z + gr, y, top, s.r(), s.g(), s.b(), ga);
             }
+
+            matrices.popPose();
+
+            STAGED_BUFFER.upload();
+            var info = STAGED_BUFFER.getExecuteInfo(draw);
+            if (info != null) {
+                drawBuffer(Minecraft.getInstance(), info, pipeline);
+            }
+            STAGED_BUFFER.endFrame();
         } catch (Throwable t) {
             fail(t);
         }
     }
 
-    private record BeamState(double x, double y, double z, int rgb) {
+    /** One vertical wall from (x1,z1) to (x2,z2), seen from the outside when the corners run in this order. */
+    private static void wall(Matrix4fc m, VertexConsumer buf,
+                             float x1, float z1, float x2, float z2, float y0, float y1,
+                             float r, float g, float b, float a) {
+        buf.addVertex(m, x1, y0, z1).setColor(r, g, b, a);
+        buf.addVertex(m, x2, y0, z2).setColor(r, g, b, a);
+        buf.addVertex(m, x2, y1, z2).setColor(r, g, b, a);
+        buf.addVertex(m, x1, y1, z1).setColor(r, g, b, a);
+    }
+
+    private static void drawBuffer(Minecraft client, StagedVertexBuffer.ExecuteInfo info, RenderPipeline pipeline) {
+        var dynamicTransforms = RenderSystem.getDynamicUniforms()
+                .writeTransform(RenderSystem.getModelViewMatrixCopy(), COLOR_MODULATOR, MODEL_OFFSET, TEXTURE_MATRIX);
+
+        RenderTarget mainTarget = client.gameRenderer.mainRenderTarget();
+        var colorTexture = mainTarget.getColorTextureView();
+
+        try (var pass = RenderSystem.getDevice()
+                .createCommandEncoder()
+                .createRenderPass(() -> WaypointsMod.MOD_ID + " beam rendering", colorTexture,
+                        Optional.empty(), mainTarget.getDepthTextureView(), OptionalDouble.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline));
+
+            RenderSystem.bindDefaultUniforms(pass);
+            pass.setUniform("DynamicTransforms", dynamicTransforms);
+
+            pass.setVertexBuffer(0, info.vertexBuffer().slice());
+            pass.setIndexBuffer(info.indexBuffer(), info.indexType());
+            pass.drawIndexed(info.indexCount(), 1, info.firstIndex(), info.baseVertex(), 0);
+        }
+    }
+
+    private record BeamState(double x, double y, double z, float r, float g, float b,
+                             float core, float glow, float fade) {
     }
 }
