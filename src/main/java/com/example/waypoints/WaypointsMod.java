@@ -229,7 +229,7 @@ public class WaypointsMod implements ClientModInitializer {
             }
         } catch (Throwable ignored) {
             // Fallback still separates dimensions if an environment does not expose its save/server.
-            worldKey = "session:" + mc.level.dimension().location();
+            worldKey = "session:" + mc.level.dimension().toString();
         }
         return worldKey + "|" + mc.level.dimension();
     }
