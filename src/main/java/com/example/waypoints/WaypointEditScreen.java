@@ -97,7 +97,6 @@ public class WaypointEditScreen extends Screen {
     private EditBox numberBox(int x, int y, int w, int value, String label) {
         EditBox box = new EditBox(this.font, x, y, w, 20, Component.literal(label));
         box.setMaxLength(9);
-        box.setFilter(s -> s.matches("-?\\d*"));
         box.setValue(String.valueOf(value));
         this.addRenderableWidget(box);
         return box;
