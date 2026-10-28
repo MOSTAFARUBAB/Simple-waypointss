@@ -6,7 +6,18 @@ version = project.mod_version
 group = project.maven_group
 
 base {
-    archivesName = project.archives_base_name
+    archivesName = project.hasProperty('withBeam') ? "${project.archives_base_name}-3d-beam" : project.archives_base_name
+}
+
+// The real 3D beam lives in its own package and is only compiled with -PwithBeam=true.
+sourceSets {
+    main {
+        java {
+            if (!project.hasProperty('withBeam')) {
+                exclude 'com/example/waypoints/beam/**'
+            }
+        }
+    }
 }
 
 repositories {

@@ -59,10 +59,18 @@ public class WaypointsMod implements ClientModInitializer {
     private static KeyMapping menuKey;
     private static boolean openMenuRequested = false;
 
+    /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
+    public static volatile boolean beam3dActive = false;
+
     @Override
     public void onInitializeClient() {
         load();
-        BeamRenderer.init();
+        // Try to enable the real 3D beam (only present in the "3d-beam" build). Falls back to the on-screen beam.
+        try {
+            Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
+        } catch (Throwable t) {
+            beam3dActive = false;
+        }
 
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
         addKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.simplewaypoints.add", InputConstants.KEY_B, category));
@@ -192,11 +200,11 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     // ---------------- data ----------------
-    static List<Waypoint> waypoints() {
+    public static List<Waypoint> waypoints() {
         return WAYPOINTS;
     }
 
-    static String currentDimension() {
+    public static String currentDimension() {
         Minecraft mc = Minecraft.getInstance();
         return mc.level != null ? mc.level.dimension().toString() : "unknown";
     }
@@ -308,7 +316,7 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     /** Actual 0xRRGGBB to draw this frame (handles the rainbow effect). */
-    static int resolveColor(Waypoint w) {
+    public static int resolveColor(Waypoint w) {
         if (w.color() != CHROMA) return w.color() & 0xFFFFFF;
         float h = (System.currentTimeMillis() % 4000L) / 4000f * 6f;
         int i = (int) h;
@@ -391,8 +399,8 @@ public class WaypointsMod implements ClientModInitializer {
             int rgb = resolveColor(w);
 
             // beam: fades out smoothly as you get close, so it never pops on/off
-            double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 5.0));
-            if (fade > 0.02) {
+            double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
+            if (!beam3dActive && fade > 0.02) {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
@@ -460,7 +468,7 @@ public class WaypointsMod implements ClientModInitializer {
             double hw = Math.max(2.0, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * invA);
             int cx = (int) a[0];
             int cy = (int) yA;
-            g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(0.95 * fade, rgb));
+            g.fill(cx - (int) hw, cy - (int) hw, cx + (int) hw, cy + (int) hw, argb(1.0 * fade, rgb));
             return;
         }
 
@@ -475,8 +483,8 @@ public class WaypointsMod implements ClientModInitializer {
             // soft glow first, bright core on top
             double glowHalf = Math.max(2.5, GLOW_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
             double coreHalf = Math.max(1.4, CORE_HALF_WIDTH_BLOCKS * pxPerInvDepth * inv);
-            drawRowSpan(g, sx, sy, glowHalf, 0.32 * fade, rgb, sw);
-            drawRowSpan(g, sx, sy, coreHalf, 0.95 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, glowHalf, 0.18 * fade, rgb, sw);
+            drawRowSpan(g, sx, sy, coreHalf, 1.0 * fade, rgb, sw);
         }
     }
 

@@ -27,3 +27,9 @@ If the build fails, open the failed step, copy the red error lines and send them
 
 If the build fails and the error mentions BeamRenderer: delete src/main/java/com/example/waypoints/BeamRenderer.java
 and the line `BeamRenderer.init();` in WaypointsMod.java, then rebuild (you keep the labels, lose the beam).
+
+## Two jars
+The build makes two jars (see Actions > run > Artifacts):
+- simple-waypoints-basic          : always works. Beam is drawn on screen (can shake a little).
+- simple-waypoints-3d-beam        : real 3D beam inside the world (no flicker). Only appears if it compiled.
+Use the 3d-beam one if it exists. Never put both jars in the mods folder.
