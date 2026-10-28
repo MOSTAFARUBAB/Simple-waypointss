@@ -64,11 +64,9 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile boolean beam3dActive = false;
     public static volatile boolean showWaypointLabels = true;
     public static volatile boolean showWaypointBeams = true;
-    /** 0=normal, 1=thick, 2=extra thick. */
-    public static volatile int beamThickness = 1;
-
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.16f : beamThickness == 1 ? 0.22f : 0.30f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.55f : beamThickness == 1 ? 0.80f : 1.10f; }
+    // Match the vanilla beacon beam proportions; do not widen the native beam.
+    public static float beamInnerRadius() { return 0.2f; }
+    public static float beamOuterRadius() { return 0.25f; }
 
 
     @Override
@@ -223,8 +221,8 @@ public class WaypointsMod implements ClientModInitializer {
         String worldId = currentWorldId();
         String requested = normalizeDimension(dimensionFilter);
         return WAYPOINTS.stream()
-                .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
-                .filter(w -> "all".equals(dimensionFilter) || sameDimension(w.dimension(), requested))
+                .filter(w -> sameWorld(w.worldId(), worldId))
+                .filter(w -> "all".equals(normalizeDimension(dimensionFilter)) || sameDimension(w.dimension(), requested))
                 .toList();
     }
 
@@ -249,6 +247,11 @@ public class WaypointsMod implements ClientModInitializer {
 
     public static boolean sameDimension(String a, String b) {
         return java.util.Objects.equals(normalizeDimension(a), normalizeDimension(b));
+    }
+
+    private static boolean sameWorld(String a, String b) {
+        if (a == null || b == null) return false;
+        return a.trim().replaceAll("\\s+", "").equalsIgnoreCase(b.trim().replaceAll("\\s+", ""));
     }
 
     /** Generate numbering independently for each server/save and dimension. */
@@ -632,18 +635,20 @@ public class WaypointsMod implements ClientModInitializer {
 
         float nameScale = scaleOk ? 0.6f : 1f;
         String distText = formatDistance(dist);
-        // Use a consistent waypoint-pin diamond instead of changing the icon with the name.
-        String letter = "◆";
-
-        // --- icon: rounded colored square with the first letter ---
+        // Font-independent pixel pin: avoid Unicode symbols that render as corrupted glyphs
+        // with some resource packs / font mods.
         int ix = cx - ICON_SIZE / 2;
         int iy = cy - ICON_SIZE / 2;
         int fillColor = 0xFF000000 | rgb;
+        int white = 0xFFFFFFFF;
+        // colored square backing
         g.fill(ix + 1, iy, ix + ICON_SIZE - 1, iy + ICON_SIZE, fillColor);
         g.fill(ix, iy + 1, ix + ICON_SIZE, iy + ICON_SIZE - 1, fillColor);
-        int lum = (((rgb >> 16) & 0xFF) * 299 + ((rgb >> 8) & 0xFF) * 587 + (rgb & 0xFF) * 114) / 1000;
-        int letterColor = lum > 170 ? 0xFF101010 : 0xFFFFFFFF;
-        g.text(font, letter, cx - font.width(letter) / 2, iy + 2, letterColor, false);
+        // simple white waypoint flag built from rectangles only
+        g.fill(cx - 2, iy + 2, cx + 2, iy + 9, white);
+        g.fill(cx - 2, iy + 2, cx + 3, iy + 4, white);
+        g.fill(cx, iy + 4, cx + 3, iy + 6, white);
+        g.fill(cx - 2, iy + 8, cx + 2, iy + 9, white);
 
         // --- name: small text on a dark strip ---
         int nameTop = iy + ICON_SIZE + 1;

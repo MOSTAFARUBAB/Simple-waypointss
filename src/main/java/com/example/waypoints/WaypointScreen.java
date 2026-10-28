@@ -80,16 +80,11 @@ public class WaypointScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("Labels: " + (WaypointsMod.showWaypointLabels ? "ON" : "OFF")), btn -> {
             WaypointsMod.showWaypointLabels = !WaypointsMod.showWaypointLabels;
             open(p);
-        }).bounds(cx - 42, 54, 82, 20).build());
+        }).bounds(cx - 82, 54, 82, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Beams: " + (WaypointsMod.showWaypointBeams ? "ON" : "OFF")), btn -> {
             WaypointsMod.showWaypointBeams = !WaypointsMod.showWaypointBeams;
             open(p);
-        }).bounds(cx + 44, 54, 82, 20).build());
-        String thicknessName = WaypointsMod.beamThickness == 0 ? "Normal" : WaypointsMod.beamThickness == 1 ? "Thick" : "Extra Thick";
-        this.addRenderableWidget(Button.builder(Component.literal("Width: " + thicknessName), btn -> {
-            WaypointsMod.beamThickness = (WaypointsMod.beamThickness + 1) % 3;
-            open(p);
-        }).bounds(cx - 160, 54, 110, 20).build());
+        }).bounds(cx + 4, 54, 82, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Dimension: " + dimensionLabel()), btn -> {
             dimensionFilter = switch (dimensionFilter) {
                 case "current" -> "overworld";
