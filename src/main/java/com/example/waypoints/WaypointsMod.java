@@ -86,6 +86,12 @@ public class WaypointsMod implements ClientModInitializer {
             beam3dActive = false;
         }
 
+        // Flat ring on the ground around each waypoint (only in the 3d-beam build). Separate from the beam.
+        try {
+            Class.forName("com.example.waypoints.beam.Ring3D").getMethod("init").invoke(null);
+        } catch (Throwable ignored) {
+        }
+
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
         addKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.simplewaypoints.add", InputConstants.KEY_B, category));
         menuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.simplewaypoints.menu", InputConstants.KEY_J, category));
@@ -668,18 +674,18 @@ public class WaypointsMod implements ClientModInitializer {
                 drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
-            // Labels can be disabled from the waypoint menu. Hide the marker when standing
-            // almost on top of the waypoint; this prevents the oversized close-up label seen in-game.
+            // Labels can be disabled from the waypoint menu. Hide the label only when you are standing
+            // almost inside the waypoint.
             if (!showWaypointLabels) continue;
             double pdx = w.x() + 0.5 - playerEye.x;
             double pdy = w.y() + 0.5 - playerEye.y;
             double pdz = w.z() + 0.5 - playerEye.z;
             double dist = Math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
-            if (dist < 2.5) continue;
+            if (dist < 1.0) continue;
 
-            // Feather-style marker: colored letter icon, small name, distance with one decimal
+            // Pill label: "name [5m]" in a rounded dark box with a border in the waypoint color
             double dx = bx;
-            double dy = by + 1.5;
+            double dy = by + 2.5;
             double dz = bz;
             double[] p = project(dx, dy, dz, f, r, u, sw, sh, tanHalfFov, aspect);
             if (p == null) continue;
@@ -688,7 +694,7 @@ public class WaypointsMod implements ClientModInitializer {
             if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
             // distance is measured from the player, not from the camera
-            drawMarker(graphics, font, w.name(), w.safeMarkerText(), dist, rgb, sx, sy);
+            drawPill(graphics, font, w.name(), dist, rgb, sx, sy);
         }
     }
 
@@ -743,43 +749,106 @@ public class WaypointsMod implements ClientModInitializer {
     // ---------------- Crisp waypoint marker ----------------
     // Draw the logo as simple GUI geometry and use Minecraft's normal text renderer.
     // Avoid matrix scaling here: scaling extracted GUI text can cause glyph clipping/jitter.
-    private static final int STRIP_COLOR = 0xB0000000;
 
     private static String formatDistance(double d) {
         if (d < 1000.0) return String.format(java.util.Locale.ROOT, "%.1fm", d);
         return (int) d + "m";
     }
 
-    private static void drawMarker(GuiGraphicsExtractor g, Font font, String name, String markerText, double dist, int rgb, int cx, int cy) {
-        String distText = formatDistance(dist);
+    // ---------------- pill label ----------------
+    private static java.lang.reflect.Method M_POSE, M_PUSH, M_POP, M_TRANSLATE, M_SCALE;
+    private static boolean scaleChecked = false;
+    private static boolean scaleOk = false;
 
-        // The logo color always follows this waypoint's beam color. Its letter is stored per waypoint.
-        int pixel = switch (markerSizeMode) { case 0 -> 1; case 2 -> 3; default -> 2; };
-        int iconSize = 5 * pixel + 4;
-        int ix = cx - iconSize / 2;
-        int iy = cy - iconSize / 2;
-        int logoColor = 0xFF000000 | (rgb & 0xFFFFFF);
-        g.fill(ix - 1, iy - 1, ix + iconSize + 1, iy + iconSize + 1, 0xFF202020);
-        g.fill(ix, iy, ix + iconSize, iy + iconSize, logoColor);
+    /** Scaling uses the GUI pose stack (looked up by reflection). If it is not available the label simply stays at normal size. */
+    private static void initScale(GuiGraphicsExtractor g) {
+        scaleChecked = true;
+        try {
+            M_POSE = g.getClass().getMethod("pose");
+            Object pose = M_POSE.invoke(g);
+            Class<?> pc = pose.getClass();
+            M_PUSH = pc.getMethod("pushMatrix");
+            M_POP = pc.getMethod("popMatrix");
+            M_TRANSLATE = pc.getMethod("translate", float.class, float.class);
+            M_SCALE = pc.getMethod("scale", float.class, float.class);
+            scaleOk = true;
+        } catch (Throwable t) {
+            scaleOk = false;
+        }
+    }
 
-        // Use Minecraft's font for the user-selected character(s), centered and kept at native scale.
-        String glyph = markerText == null || markerText.isBlank() ? "W" : markerText;
-        int glyphWidth = font.width(glyph);
-        int glyphX = cx - glyphWidth / 2;
-        int glyphY = iy + Math.max(0, (iconSize - 8) / 2);
-        g.text(font, glyph, glyphX, glyphY, 0xFFFFFFFF, true);
+    /** The label grows in whole steps when you get close (whole numbers keep the text sharp). Logo size sets the biggest step. */
+    private static int pillScale(double dist) {
+        int max = switch (markerSizeMode) { case 0 -> 1; case 2 -> 3; default -> 2; };
+        int wanted = dist < 1.8 ? 3 : dist < 3.0 ? 2 : 1;
+        return Math.min(max, wanted);
+    }
 
-        int nameTop = iy + iconSize + 2;
-        int nameW = font.width(name);
-        int nameH = 9;
-        int nameLeft = cx - nameW / 2;
-        g.fill(nameLeft - 3, nameTop - 1, nameLeft + nameW + 3, nameTop + nameH, STRIP_COLOR);
-        g.text(font, name, nameLeft, nameTop, 0xFFFFFFFF, true);
+    private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
+        if (!scaleChecked) initScale(g);
+        String text = name + " [" + Math.round(dist) + "m]";
+        int scale = scaleOk ? pillScale(dist) : 1;
 
-        int distTop = nameTop + nameH + 1;
-        int distW = font.width(distText);
-        g.fill(cx - distW / 2 - 4, distTop - 1, cx + distW / 2 + 4, distTop + 10, STRIP_COLOR);
-        g.text(font, distText, cx - distW / 2, distTop, 0xFFFFFFFF, true);
+        Object pose = null;
+        boolean pushed = false;
+        try {
+            if (scale > 1) {
+                pose = M_POSE.invoke(g);
+                M_PUSH.invoke(pose);
+                pushed = true;
+                M_TRANSLATE.invoke(pose, (float) cx, (float) cy);
+                M_SCALE.invoke(pose, (float) scale, (float) scale);
+                drawPillShape(g, font, text, rgb, 0, 0);
+            } else {
+                drawPillShape(g, font, text, rgb, cx, cy);
+            }
+        } catch (Throwable t) {
+            scaleOk = false;
+        } finally {
+            if (pushed) {
+                try {
+                    M_POP.invoke(pose);
+                } catch (Throwable ignored) {
+                    scaleOk = false;
+                }
+            }
+        }
+    }
+
+    /** Draws the pill centred on (cx, cy): 14 px high, 1 px border in the waypoint color, 60% black inside, white text. */
+    private static void drawPillShape(GuiGraphicsExtractor g, Font font, String text, int rgb, int cx, int cy) {
+        final int h = 14;
+        int textW = font.width(text);
+        int w = textW + 8;
+        int x = cx - w / 2;
+        int y = cy - h / 2;
+        int border = 0xFF000000 | (rgb & 0xFFFFFF);
+        int fill = 0x99000000;
+
+        double rOuter = h / 2.0;
+        double rInner = rOuter - 1.0;
+        for (int row = 0; row < h; row++) {
+            double dy = (row + 0.5) - rOuter;
+            int oIn = (int) Math.round(rOuter - Math.sqrt(Math.max(0.0, rOuter * rOuter - dy * dy)));
+            int ox0 = x + oIn;
+            int ox1 = x + w - oIn;
+            int py = y + row;
+            if (row == 0 || row == h - 1) {
+                g.fill(ox0, py, ox1, py + 1, border);
+                continue;
+            }
+            int iIn = 1 + (int) Math.round(rInner - Math.sqrt(Math.max(0.0, rInner * rInner - dy * dy)));
+            int ix0 = Math.max(ox0 + 1, x + iIn);
+            int ix1 = Math.min(ox1 - 1, x + w - iIn);
+            if (ix1 <= ix0) {
+                g.fill(ox0, py, ox1, py + 1, border);
+                continue;
+            }
+            g.fill(ox0, py, ix0, py + 1, border);
+            g.fill(ix0, py, ix1, py + 1, fill);
+            g.fill(ix1, py, ox1, py + 1, border);
+        }
+        g.text(font, text, cx - textW / 2, y + 3, 0xFFFFFFFF, false);
     }
 
     /** Projects a world offset (relative to the eye) to {screenX, screenY, depth}, or null if behind the camera. */
