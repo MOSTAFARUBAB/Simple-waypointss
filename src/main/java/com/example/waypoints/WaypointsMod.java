@@ -72,8 +72,8 @@ public class WaypointsMod implements ClientModInitializer {
     /** Marker settings are adjustable from the waypoint menu. */
     public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
 
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.12f : beamThickness == 1 ? 0.20f : 0.28f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.18f : beamThickness == 1 ? 0.27f : 0.36f; }
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
 
 
     @Override
@@ -612,7 +612,6 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     // ---------------- HUD rendering (beam + label) ----------------
-    private static final double BEAM_HEIGHT = 320.0;
     private static final double CORE_HALF_WIDTH_BLOCKS = 0.22;
     private static final double GLOW_HALF_WIDTH_BLOCKS = 0.6;
 
@@ -652,7 +651,7 @@ public class WaypointsMod implements ClientModInitializer {
         int sw = mc.getWindow().getGuiScaledWidth();
         int sh = mc.getWindow().getGuiScaledHeight();
         double aspect = (double) sw / (double) sh;
-        double tanHalfFov = Math.tan(Math.toRadians(mc.options.fov().get()) / 2.0);
+        double tanHalfFov = Math.tan(Math.toRadians(effectiveFov(mc, partial)) / 2.0);
 
         Font font = mc.font;
         String dim = currentDimension();
@@ -671,7 +670,9 @@ public class WaypointsMod implements ClientModInitializer {
             // Keep nearby waypoint beams hidden to avoid a huge beam obscuring the view.
             double fade = Math.max(0.0, Math.min(1.0, (horiz - 1.0) / 3.0));
             if (showWaypointBeams && !beam3dActive && fade > 0.02) {
-                drawBeam(graphics, bx, by, bz, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
+                double beamBaseY = mc.level.getMinY() - eye.y;
+                double beamHeight = mc.level.getMaxY() - mc.level.getMinY();
+                drawBeam(graphics, bx, beamBaseY, bz, beamHeight, f, r, u, sw, sh, tanHalfFov, aspect, rgb, fade);
             }
 
             // Labels can be disabled from the waypoint menu. Hide the label only when you are standing
@@ -696,6 +697,23 @@ public class WaypointsMod implements ClientModInitializer {
             // distance is measured from the player, not from the camera
             drawPill(graphics, font, w.name(), dist, rgb, sx, sy);
         }
+    }
+
+    /** Uses the renderer's effective FOV when available (including zoom/spyglass effects),
+     * falling back to the user FOV option when this Minecraft version exposes no compatible method. */
+    private static double effectiveFov(Minecraft mc, float partialTick) {
+        try {
+            Object camera = mc.gameRenderer.getClass().getMethod("getMainCamera").invoke(mc.gameRenderer);
+            for (java.lang.reflect.Method method : mc.gameRenderer.getClass().getMethods()) {
+                if (!method.getName().equals("getFov") || method.getParameterCount() != 3) continue;
+                Class<?>[] types = method.getParameterTypes();
+                if (camera == null || !types[0].isInstance(camera) || types[1] != float.class || types[2] != boolean.class) continue;
+                Object value = method.invoke(mc.gameRenderer, camera, partialTick, true);
+                if (value instanceof Number n && n.doubleValue() > 0.0 && n.doubleValue() < 180.0) return n.doubleValue();
+            }
+        } catch (Throwable ignored) {
+        }
+        return mc.options.fov().get();
     }
 
     // ---------------- real camera lookup (reflection, falls back to the player's view) ----------------
@@ -787,7 +805,7 @@ public class WaypointsMod implements ClientModInitializer {
     private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
         if (!scaleChecked) initScale(g);
         String text = name + " [" + Math.round(dist) + "m]";
-        int scale = 1; // Keep the HUD label anchored and crisp; distance-based GUI scaling caused apparent drift.
+        int scale = scaleOk ? pillScale(dist) : 1;
 
         Object pose = null;
         boolean pushed = false;
@@ -868,12 +886,12 @@ public class WaypointsMod implements ClientModInitializer {
      * so it is drawn row by row. Edges are anti-aliased with partly transparent pixels so the width
      * changes smoothly (no popping or flicker) while you walk.
      */
-    private static void drawBeam(GuiGraphicsExtractor g, double bx, double by, double bz,
+    private static void drawBeam(GuiGraphicsExtractor g, double bx, double by, double bz, double beamHeight,
                                  double[] f, double[] r, double[] u, int sw, int sh,
                                  double tanHalfFov, double aspect, int rgb, double fade) {
         double near = 0.1;
         double d0 = bx * f[0] + by * f[1] + bz * f[2];
-        double d1 = d0 + BEAM_HEIGHT * f[1];
+        double d1 = d0 + beamHeight * f[1];
         if (d0 < near && d1 < near) return;
 
         double t0 = 0.0;
@@ -881,8 +899,8 @@ public class WaypointsMod implements ClientModInitializer {
         if (d0 < near) t0 = (near - d0) / (d1 - d0);
         else if (d1 < near) t1 = (near - d0) / (d1 - d0);
 
-        double[] a = project(bx, by + t0 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
-        double[] b = project(bx, by + t1 * BEAM_HEIGHT, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        double[] a = project(bx, by + t0 * beamHeight, bz, f, r, u, sw, sh, tanHalfFov, aspect);
+        double[] b = project(bx, by + t1 * beamHeight, bz, f, r, u, sw, sh, tanHalfFov, aspect);
         if (a == null || b == null) return;
 
         double pxPerInvDepth = (sh / 2.0) / tanHalfFov;
