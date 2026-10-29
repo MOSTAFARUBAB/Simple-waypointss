@@ -229,7 +229,7 @@ public class WaypointsMod implements ClientModInitializer {
         String mode = menuDimensionId();
         return WAYPOINTS.stream()
                 .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
-                .filter(w -> mode.equals("all") || java.util.Objects.equals(normalizeDimension(w.dimension()), mode))
+                .filter(w -> dimensionMatches(w, mode))
                 .toList();
     }
 
@@ -238,8 +238,14 @@ public class WaypointsMod implements ClientModInitializer {
         migrateLegacyWorldIds(worldId);
         return WAYPOINTS.stream()
                 .filter(w -> java.util.Objects.equals(w.worldId(), worldId))
-                .filter(w -> java.util.Objects.equals(normalizeDimension(w.dimension()), dimension))
+                .filter(w -> dimensionMatches(w, dimension))
                 .toList();
+    }
+
+    /** True if the waypoint belongs in this dimension. A waypoint set to "all" shows in every dimension. */
+    static boolean dimensionMatches(Waypoint w, String dimension) {
+        String d = normalizeDimension(w.dimension());
+        return "all".equals(d) || "all".equals(dimension) || java.util.Objects.equals(d, dimension);
     }
 
     /** Assigns pre-worldId saves to the first active save/server that opens the menu.
@@ -645,7 +651,7 @@ public class WaypointsMod implements ClientModInitializer {
 
         for (Waypoint w : WAYPOINTS) {
             if (!java.util.Objects.equals(w.worldId(), worldId)) continue;
-            if (!java.util.Objects.equals(normalizeDimension(w.dimension()), dim)) continue;
+            if (!dimensionMatches(w, dim)) continue;
 
             double bx = w.x() + 0.5 - eye.x;
             double by = w.y() - eye.y;
