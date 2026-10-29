@@ -75,6 +75,14 @@ public class WaypointScreen extends Screen {
         return WaypointsMod.beamThickness == 0 ? "Normal" : WaypointsMod.beamThickness == 1 ? "Thick" : "XThick";
     }
 
+    /** Plain dark overlay instead of Minecraft's blurred world, so the menu looks sharp and clear. */
+    public void extractBlurredBackground(GuiGraphicsExtractor g) {
+    }
+
+    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        g.fill(0, 0, this.width, this.height, 0xB0000000);
+    }
+
     // ------------------------------------------------------------------ widgets (invisible click targets)
     @Override
     protected void init() {

@@ -59,6 +59,7 @@ public class WaypointsMod implements ClientModInitializer {
     private static KeyMapping addKey;
     private static KeyMapping menuKey;
     private static boolean openMenuRequested = false;
+    private static boolean openNewRequested = false;
 
     /** True when the real 3D beam is running; then the on-screen beam is not drawn. */
     public static volatile boolean beam3dActive = false;
@@ -93,13 +94,15 @@ public class WaypointsMod implements ClientModInitializer {
             purgeExpired();
             while (addKey.consumeClick()) {
                 if (client.player == null) return;
-                addHere();
-                client.player.sendSystemMessage(Component.literal("Waypoint added. Press J to edit or delete it."));
+                openNewRequested = true; // B opens the "New Waypoint" menu (name, X/Y/Z, dimension, color) instead of adding one instantly
             }
             while (menuKey.consumeClick()) {
                 openMenuRequested = true;
             }
-            if (openMenuRequested) {
+            if (openNewRequested) {
+                openNewRequested = false;
+                if (client.player != null) WaypointEditScreen.openNew();
+            } else if (openMenuRequested) {
                 openMenuRequested = false;
                 if (client.player != null) WaypointScreen.openMenu();
             }

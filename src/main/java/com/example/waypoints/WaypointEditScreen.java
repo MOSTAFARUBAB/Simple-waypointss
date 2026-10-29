@@ -118,6 +118,19 @@ public class WaypointEditScreen extends Screen {
         }
     }
 
+    /** Opened by the B key: a blank "New Waypoint" menu, already filled with your position and dimension. */
+    static void openNew() {
+        Minecraft.getInstance().gui.setScreen(new WaypointEditScreen(null, -1));
+    }
+
+    /** Plain dark overlay instead of Minecraft's blurred world, so the menu looks sharp and clear. */
+    public void extractBlurredBackground(GuiGraphicsExtractor g) {
+    }
+
+    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        g.fill(0, 0, this.width, this.height, 0xB0000000);
+    }
+
     // ------------------------------------------------------------------ layout / widgets
     @Override
     protected void init() {
@@ -191,7 +204,11 @@ public class WaypointEditScreen extends Screen {
     }
 
     private void back() {
-        WaypointScreen.open(returnPage);
+        if (returnPage < 0) {
+            this.onClose(); // opened with B: go straight back to the game
+        } else {
+            WaypointScreen.open(returnPage);
+        }
     }
 
     // ------------------------------------------------------------------ color logic
@@ -358,7 +375,8 @@ public class WaypointEditScreen extends Screen {
         // go back
         boolean backHover = inside(mouseX, mouseY, cx - 150, oy + 22, 62, 16);
         rrect(g, cx - 150, oy + 22, cx - 88, oy + 38, backHover ? CARD_HOVER : CARD);
-        g.text(this.font, "< Go back", cx - 119 - this.font.width("< Go back") / 2, oy + 26, MUTED, false);
+        String backLabel = returnPage < 0 ? "< Cancel" : "< Go back";
+        g.text(this.font, backLabel, cx - 119 - this.font.width(backLabel) / 2, oy + 26, MUTED, false);
 
         // text boxes
         drawBox(g, nameBox, cx - 150, oy + 44, 300, 18, "Name");
