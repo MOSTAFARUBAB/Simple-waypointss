@@ -72,8 +72,8 @@ public class WaypointsMod implements ClientModInitializer {
     /** Marker settings are adjustable from the waypoint menu. */
     public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
 
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.30f : 0.42f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.25f : beamThickness == 1 ? 0.38f : 0.52f; }
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.12f : beamThickness == 1 ? 0.20f : 0.28f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.18f : beamThickness == 1 ? 0.27f : 0.36f; }
 
 
     @Override
@@ -685,7 +685,7 @@ public class WaypointsMod implements ClientModInitializer {
 
             // Pill label: "name [5m]" in a rounded dark box with a border in the waypoint color
             double dx = bx;
-            double dy = by + 2.5;
+            double dy = by + 1.5;
             double dz = bz;
             double[] p = project(dx, dy, dz, f, r, u, sw, sh, tanHalfFov, aspect);
             if (p == null) continue;
@@ -787,7 +787,7 @@ public class WaypointsMod implements ClientModInitializer {
     private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
         if (!scaleChecked) initScale(g);
         String text = name + " [" + Math.round(dist) + "m]";
-        int scale = scaleOk ? pillScale(dist) : 1;
+        int scale = 1; // Keep the HUD label anchored and crisp; distance-based GUI scaling caused apparent drift.
 
         Object pose = null;
         boolean pushed = false;

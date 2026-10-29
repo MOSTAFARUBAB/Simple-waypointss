@@ -90,8 +90,8 @@ public final class Beam3D {
 
             Vec3 camera = context.levelState().cameraRenderState.pos;
             PoseStack matrices = context.poseStack();
-            // Use the same vanilla renderer used by beacon blocks. This preserves the native
-            // animated texture, scrolling UVs, inner beam, and translucent outer glow.
+            // Use the vanilla beacon beam renderer so the texture animation and inner/outer layers
+            // remain consistent with beacon blocks. Keep radii conservative to reduce the oversized shell.
             float animationTime = (System.currentTimeMillis() % 3_600_000L) / 50.0f;
             var collector = context.submitNodeCollector();
 
