@@ -1,10 +1,11 @@
-# New waypoint menu (Feather-style)
+# New Feather-style waypoint menus
 
-Only these files changed from your project:
-- src/main/java/com/example/waypoints/WaypointEditScreen.java  (completely new look)
-- src/main/java/com/example/waypoints/WaypointsMod.java        (3 small edits so "All dimensions" waypoints show everywhere)
+Both menus were replaced with the dark Feather-style design:
+- WaypointScreen.java      : the J menu (list). Dimension buttons Overworld / Nether / End / All dimensions,
+                             toggles (Labels, Beams, Beam thickness, Logo size), + New Waypoint, Edit, Delete, paging.
+- WaypointEditScreen.java  : create / edit. Name, X/Y/Z, dimension buttons, color picker (HEX, Chroma, Reset,
+                             Recent colors), timer, logo letter.
+- WaypointsMod.java        : 3 small edits so a waypoint set to "All dimensions" shows in every dimension.
 
-New menu: name, X/Y/Z, dimension buttons (Overworld / Nether / End / All dimensions),
-color picker (click the square for saturation/brightness, click the strip for hue, or type a HEX code),
-Chroma toggle, Reset color, Recent colors, timer, logo letter, Create/Save and Delete.
+Layout fits a 270 px high GUI (1080p at GUI scale 4), so no buttons are cut off.
 Alpha slider and Favorite colors from the reference picture are not included.
