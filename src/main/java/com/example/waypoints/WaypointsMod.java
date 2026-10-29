@@ -698,7 +698,10 @@ public class WaypointsMod implements ClientModInitializer {
             if (sx < -80 || sx > sw + 80 || sy < -80 || sy > sh + 80) continue;
 
             // distance is measured from the player, not from the camera
-            drawPill(graphics, font, w.name(), dist, rgb, sx, sy);
+            // Treat the label like an object in the world: its apparent size must follow perspective
+            // (camera depth and the actual rendered FOV), rather than only the player's distance.
+            double perspectiveScale = perspectivePillScale(p[2], tanHalfFov);
+            drawPill(graphics, font, w.name(), dist, rgb, sx, sy, perspectiveScale);
         }
     }
 
@@ -810,22 +813,27 @@ public class WaypointsMod implements ClientModInitializer {
         }
     }
 
-    /** The label grows in whole steps when you get close (whole numbers keep the text sharp). Logo size sets the biggest step. */
-    private static int pillScale(double dist) {
-        int max = switch (markerSizeMode) { case 0 -> 1; case 2 -> 3; default -> 2; };
-        int wanted = dist < 1.8 ? 3 : dist < 3.0 ? 2 : 1;
-        return Math.min(max, wanted);
+    /**
+     * Screen-space pill labels still use the world projection above, but their size follows
+     * perspective too: farther depth makes them smaller and zooming in (smaller FOV) makes
+     * them larger, like a floating object anchored at the waypoint rather than a HUD element.
+     */
+    private static double perspectivePillScale(double depth, double tanHalfFov) {
+        double referenceDepth = 16.0;
+        double referenceTanHalfFov = Math.tan(Math.toRadians(70.0) / 2.0);
+        double scale = (referenceDepth / Math.max(0.1, depth)) * (referenceTanHalfFov / Math.max(0.001, tanHalfFov));
+        double max = switch (markerSizeMode) { case 0 -> 1.0; case 2 -> 3.0; default -> 2.0; };
+        return Math.max(0.05, Math.min(max, scale));
     }
 
-    private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy) {
+    private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy, double scale) {
         if (!scaleChecked) initScale(g);
         String text = name + " [" + Math.round(dist) + "m]";
-        int scale = scaleOk ? pillScale(dist) : 1;
 
         Object pose = null;
         boolean pushed = false;
         try {
-            if (scale > 1) {
+            if (scaleOk && Math.abs(scale - 1.0) > 0.001) {
                 pose = M_POSE.invoke(g);
                 M_PUSH.invoke(pose);
                 pushed = true;
