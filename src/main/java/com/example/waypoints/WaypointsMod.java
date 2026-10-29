@@ -79,10 +79,16 @@ public class WaypointsMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         load();
-        // Keep the HUD beam renderer enabled. The custom 3D BeaconRenderer path can render
-        // the opaque core without the translucent outer glow on some render pipelines.
-        // The HUD renderer explicitly draws glow first and the bright core second.
+        // Prefer the real in-world 3D beacon renderer when this project is built with
+        // -PwithBeam=true. It uses Minecraft's native BeaconRenderer geometry and texture,
+        // rather than the screen-space HUD approximation. If the optional class is absent
+        // or fails to initialize, the existing HUD renderer remains as a fallback.
         beam3dActive = false;
+        try {
+            Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
+        } catch (Throwable ignored) {
+            beam3dActive = false;
+        }
 
         // Flat ring on the ground around each waypoint (only in the 3d-beam build). Separate from the beam.
         try {
