@@ -65,28 +65,24 @@ public class WaypointsMod implements ClientModInitializer {
     public static volatile boolean beam3dActive = false;
     public static volatile boolean showWaypointLabels = true;
     public static volatile boolean showWaypointBeams = true;
-    /** 0=normal, 1=thick, 2=extra thick. */
+    /** 0=thin, 1=normal (vanilla-sized), 2=thick. */
     public static volatile int beamThickness = 1;
     /** Menu-only dimension browser: CURRENT, OVERWORLD, NETHER, END, or ALL. */
     public static volatile int menuDimensionMode = 0;
     /** Marker settings are adjustable from the waypoint menu. */
     public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
 
-    // Vanilla beacon beam radii are small world-space values. The old values made the
-    // waypoint's outer shell look like a huge solid pillar at close range.
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.045f : beamThickness == 1 ? 0.065f : 0.09f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.075f : beamThickness == 1 ? 0.105f : 0.14f; }
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.16f : beamThickness == 1 ? 0.30f : 0.42f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.38f : 0.52f; }
 
 
     @Override
     public void onInitializeClient() {
         load();
-        // Try to enable the real 3D beam (only present in the "3d-beam" build). Falls back to the on-screen beam.
-        try {
-            Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
-        } catch (Throwable t) {
-            beam3dActive = false;
-        }
+        // Keep the HUD beam renderer enabled. The custom 3D BeaconRenderer path can render
+        // the opaque core without the translucent outer glow on some render pipelines.
+        // The HUD renderer explicitly draws glow first and the bright core second.
+        beam3dActive = false;
 
         // Flat ring on the ground around each waypoint (only in the 3d-beam build). Separate from the beam.
         try {
@@ -654,7 +650,7 @@ public class WaypointsMod implements ClientModInitializer {
         int sw = mc.getWindow().getGuiScaledWidth();
         int sh = mc.getWindow().getGuiScaledHeight();
         double aspect = (double) sw / (double) sh;
-        double tanHalfFov = Math.tan(Math.toRadians(mc.options.fov().get()) / 2.0);
+        double tanHalfFov = Math.tan(Math.toRadians(effectiveRenderFov(mc, partial)) / 2.0);
 
         Font font = mc.font;
         String dim = currentDimension();
@@ -712,6 +708,35 @@ public class WaypointsMod implements ClientModInitializer {
             }
         }
         return null;
+    }
+
+    /**
+     * Ask Minecraft's renderer for the effective FOV, rather than reading the user option directly.
+     * This includes vanilla camera effects and is a better match for the projection used to draw the world.
+     * Reflection keeps this compatible with small mapping/signature changes across game versions.
+     */
+    private static double effectiveRenderFov(Minecraft mc, float partialTick) {
+        try {
+            Object renderer = mc.gameRenderer;
+            Object camera = null;
+            if (CAM_GET == null) CAM_GET = findMethod(renderer.getClass(), "getMainCamera", "mainCamera");
+            if (CAM_GET != null) camera = CAM_GET.invoke(renderer);
+            if (camera != null) {
+                for (java.lang.reflect.Method method : renderer.getClass().getMethods()) {
+                    if (!method.getName().equals("getFov") || method.getParameterCount() != 3) continue;
+                    Class<?>[] p = method.getParameterTypes();
+                    if (!p[0].isInstance(camera) || !(p[1] == float.class || p[1] == Float.class)
+                            || !(p[2] == boolean.class || p[2] == Boolean.class)) continue;
+                    Object value = method.invoke(renderer, camera, partialTick, true);
+                    if (value instanceof Number n && n.doubleValue() > 1.0 && n.doubleValue() < 179.0) {
+                        return n.doubleValue();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // Fall back to the configured FOV if the game renderer API differs.
+        }
+        return mc.options.fov().get();
     }
 
     /** Returns {x, y, z, yawDegrees, pitchDegrees} of the camera that is actually used to draw the world, or null. */

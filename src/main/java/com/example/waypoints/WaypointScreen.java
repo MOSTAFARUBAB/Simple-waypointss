@@ -72,7 +72,7 @@ public class WaypointScreen extends Screen {
     }
 
     private static String thicknessName() {
-        return WaypointsMod.beamThickness == 0 ? "Normal" : WaypointsMod.beamThickness == 1 ? "Thick" : "XThick";
+        return WaypointsMod.beamThickness == 0 ? "Thin" : WaypointsMod.beamThickness == 1 ? "Normal" : "Thick";
     }
 
     /** Plain dark overlay instead of Minecraft's blurred world, so the menu looks sharp and clear. */
