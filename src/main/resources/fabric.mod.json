@@ -1,10 +1,22 @@
 {
   "schemaVersion": 1,
-  "id": "simple_waypoints",
+  "id": "simplewaypoints",
   "version": "${version}",
   "name": "Simple Waypoints",
-  "description": "Standalone client-side waypoint manager.",
+  "description": "Client-side waypoints marked only by native 3D beacon beams. No floating labels, logo markers, or ground rings.",
+  "authors": [
+    "You"
+  ],
   "environment": "client",
-  "entrypoints": { "client": ["com.rubab.simplewaypoints.SimpleWaypointsClient"] },
-  "depends": { "fabricloader": ">=0.19.5", "minecraft": "~26.3", "java": ">=25", "fabric-api": "*" }
+  "entrypoints": {
+    "client": [
+      "com.example.waypoints.WaypointsMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": ">=26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
 }

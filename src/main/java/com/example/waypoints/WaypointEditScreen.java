@@ -57,7 +57,6 @@ public class WaypointEditScreen extends Screen {
     private final String initY;
     private final String initZ;
     private final String initTimer;
-    private final String initMarker;
     private final String keepDimension;
 
     private EditBox nameBox;
@@ -66,7 +65,6 @@ public class WaypointEditScreen extends Screen {
     private EditBox zBox;
     private EditBox hexBox;
     private EditBox timerBox;
-    private EditBox markerBox;
 
     private float hue = 0f;
     private float sat = 1f;
@@ -92,7 +90,6 @@ public class WaypointEditScreen extends Screen {
             initTimer = original.expiresAt() > 0
                     ? String.valueOf(Math.max(1, (original.expiresAt() - System.currentTimeMillis()) / 1000))
                     : "0";
-            initMarker = original.safeMarkerText();
             keepDimension = original.dimension();
             if (original.color() == WaypointsMod.CHROMA) {
                 chroma = true;
@@ -107,7 +104,6 @@ public class WaypointEditScreen extends Screen {
             initY = String.valueOf(p.getY());
             initZ = String.valueOf(p.getZ());
             initTimer = "0";
-            initMarker = "W";
             keepDimension = WaypointsMod.currentDimension();
         }
 
@@ -177,7 +173,6 @@ public class WaypointEditScreen extends Screen {
         lastHex = hexBox.getValue();
 
         timerBox = makeBox(timerBox, cx - 100, oy + 198, 56, 16, initTimer, 6, "0");
-        markerBox = makeBox(markerBox, cx - 6, oy + 198, 28, 16, initMarker, 1, "W");
 
         // save / delete
         int saveWidth = original != null ? 216 : 300;
@@ -331,9 +326,8 @@ public class WaypointEditScreen extends Screen {
         }
 
         int color = chroma ? WaypointsMod.CHROMA : currentRgb();
-        String marker = markerBox.getValue().trim();
-        if (marker.isEmpty()) marker = "W";
-        marker = marker.toUpperCase(Locale.ROOT);
+        // Keep the legacy JSON marker field for backwards compatibility; it is not rendered.
+        String marker = original != null ? original.safeMarkerText() : "W";
 
         long expires = secs > 0 ? System.currentTimeMillis() + secs * 1000L : 0L;
         String dim = dimMode >= 0 ? DIM_IDS[dimMode] : keepDimension;
@@ -448,12 +442,10 @@ public class WaypointEditScreen extends Screen {
             rrect(g, cx + 2 + i * 16, oy + 181, cx + 16 + i * 16, oy + 191, 0xFF000000 | RECENT.get(i));
         }
 
-        // timer + logo
+        // timer
         g.text(this.font, "Timer (s)", cx - 150, oy + 202, MUTED, false);
         drawBox(g, timerBox, cx - 100, oy + 198, 56, 16, "0");
-        g.text(this.font, "Logo", cx - 34, oy + 202, MUTED, false);
-        drawBox(g, markerBox, cx - 6, oy + 198, 28, 16, "W");
-        g.text(this.font, "0 = forever", cx + 30, oy + 202, MUTED, false);
+        g.text(this.font, "0 = forever", cx - 30, oy + 202, MUTED, false);
 
         // save / delete
         int saveWidth = original != null ? 216 : 300;

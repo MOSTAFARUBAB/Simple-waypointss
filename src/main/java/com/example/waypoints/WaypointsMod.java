@@ -41,8 +41,8 @@ import java.util.function.UnaryOperator;
 /**
  * Simple client-side waypoints for Minecraft 26.3 (Fabric, Mojang names).
  *
- * Beam + label are drawn on the HUD by projecting each waypoint's world position onto the screen,
- * so they show through walls. Waypoints are saved to config/simple-waypoints.json.
+ * Waypoints are saved to config/simple-waypoints.json. The world marker is only the native
+ * 3D beacon beam; no HUD labels, logo markers, or ground rings are rendered.
  */
 public class WaypointsMod implements ClientModInitializer {
     public static final String MOD_ID = "simplewaypoints";
@@ -80,23 +80,13 @@ public class WaypointsMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         load();
-        // Prefer the real in-world 3D beacon renderer when this project is built with
-        // -PwithBeam=true. It uses Minecraft's native BeaconRenderer geometry and texture,
-        // rather than the screen-space HUD approximation. If the optional class is absent
-        // or fails to initialize, the existing HUD renderer remains as a fallback.
+        // Initialize the native in-world 3D beacon renderer. The build workflow uses
+        // -PwithBeam=true so this class is included in the produced mod.
         beam3dActive = false;
         try {
             Class.forName("com.example.waypoints.beam.Beam3D").getMethod("init").invoke(null);
         } catch (Throwable error) {
             beam3dActive = false;
-            error.printStackTrace();
-        }
-
-        // Register the ground ring independently from the beam renderer so a ring failure
-        // cannot silently disable the native beacon beam.
-        try {
-            Class.forName("com.example.waypoints.beam.Ring3D").getMethod("init").invoke(null);
-        } catch (Throwable error) {
             error.printStackTrace();
         }
 
@@ -124,10 +114,8 @@ public class WaypointsMod implements ClientModInitializer {
 
         registerCommands();
 
-        HudElementRegistry.attachElementBefore(
-                VanillaHudElements.CHAT,
-                Identifier.fromNamespaceAndPath(MOD_ID, "waypoints"),
-                WaypointsMod::renderHud);
+        // Beam-only world marker: deliberately do not register the old HUD renderer.
+        // This prevents screen-space beams, floating waypoint labels, and logo markers.
     }
 
     // ---------------- commands ----------------
