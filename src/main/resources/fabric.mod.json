@@ -1,18 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "simplewaypoints",
+  "id": "simple_waypoints",
   "version": "${version}",
   "name": "Simple Waypoints",
-  "description": "Client-side waypoints with on-screen labels, a keybind and commands.",
-  "authors": ["You"],
+  "description": "Standalone client-side waypoint manager.",
   "environment": "client",
-  "entrypoints": {
-    "client": ["com.example.waypoints.WaypointsMod"]
-  },
-  "depends": {
-    "fabricloader": ">=0.19.3",
-    "minecraft": ">=26.3",
-    "java": ">=25",
-    "fabric-api": "*"
-  }
+  "entrypoints": { "client": ["com.rubab.simplewaypoints.SimpleWaypointsClient"] },
+  "depends": { "fabricloader": ">=0.19.5", "minecraft": "~26.3", "java": ">=25", "fabric-api": "*" }
 }
