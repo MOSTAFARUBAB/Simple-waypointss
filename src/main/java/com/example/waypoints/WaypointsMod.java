@@ -72,8 +72,8 @@ public class WaypointsMod implements ClientModInitializer {
     /** Marker settings are adjustable from the waypoint menu. */
     public static volatile int markerSizeMode = 1; // 0 small, 1 medium, 2 large
 
-    public static float beamInnerRadius() { return beamThickness == 0 ? 0.16f : beamThickness == 1 ? 0.30f : 0.42f; }
-    public static float beamOuterRadius() { return beamThickness == 0 ? 0.20f : beamThickness == 1 ? 0.38f : 0.52f; }
+    public static float beamInnerRadius() { return beamThickness == 0 ? 0.12f : beamThickness == 1 ? 0.20f : 0.30f; }
+    public static float beamOuterRadius() { return beamThickness == 0 ? 0.16f : beamThickness == 1 ? 0.25f : 0.38f; }
 
 
     @Override
@@ -814,16 +814,15 @@ public class WaypointsMod implements ClientModInitializer {
     }
 
     /**
-     * Screen-space pill labels still use the world projection above, but their size follows
-     * perspective too: farther depth makes them smaller and zooming in (smaller FOV) makes
-     * them larger, like a floating object anchored at the waypoint rather than a HUD element.
+     * The requested waypoint-label behavior is intentionally reversed from normal perspective:
+     * labels grow as the waypoint gets farther away. Do not factor FOV into this calculation;
+     * camera zoom changes FOV and was causing the label size to jump/glitch.
      */
     private static double perspectivePillScale(double depth, double tanHalfFov) {
         double referenceDepth = 16.0;
-        double referenceTanHalfFov = Math.tan(Math.toRadians(70.0) / 2.0);
-        double scale = (referenceDepth / Math.max(0.1, depth)) * (referenceTanHalfFov / Math.max(0.001, tanHalfFov));
+        double scale = Math.max(0.1, depth) / referenceDepth;
         double max = switch (markerSizeMode) { case 0 -> 1.0; case 2 -> 3.0; default -> 2.0; };
-        return Math.max(0.05, Math.min(max, scale));
+        return Math.max(0.5, Math.min(max, scale));
     }
 
     private static void drawPill(GuiGraphicsExtractor g, Font font, String name, double dist, int rgb, int cx, int cy, double scale) {

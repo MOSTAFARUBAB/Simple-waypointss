@@ -10,8 +10,8 @@ import java.util.List;
 
 /**
  * Waypoint list in the dark Feather-style layout. Open with J or /wp menu.
- * Dimension buttons (Overworld / Nether / End / All dimensions) filter the list; toggles control labels,
- * beams, beam thickness and logo size.
+ * Dimension buttons (Overworld / Nether / End / All dimensions) filter the list; toggles control labels
+ * and beacon beam visibility/thickness.
  *
  * Normal Minecraft buttons sit invisibly in the right places and handle clicking;
  * everything you SEE is drawn on top of them in extractRenderState.
@@ -122,11 +122,6 @@ public class WaypointScreen extends Screen {
             WaypointsMod.beamThickness = (WaypointsMod.beamThickness + 1) % 3;
             open(p);
         });
-        click(cx + 82, oy + 66, 68, 16, () -> {
-            WaypointsMod.markerSizeMode = (WaypointsMod.markerSizeMode + 1) % 3;
-            open(p);
-        });
-
         // rows
         for (int i = start; i < end; i++) {
             final Waypoint w = all.get(i);
@@ -197,7 +192,6 @@ public class WaypointScreen extends Screen {
         chip(g, mouseX, mouseY, cx - 150, oy + 66, 68, "Labels: " + (WaypointsMod.showWaypointLabels ? "ON" : "OFF"), WaypointsMod.showWaypointLabels);
         chip(g, mouseX, mouseY, cx - 78, oy + 66, 68, "Beams: " + (WaypointsMod.showWaypointBeams ? "ON" : "OFF"), WaypointsMod.showWaypointBeams);
         chip(g, mouseX, mouseY, cx - 6, oy + 66, 84, "Beam: " + thicknessName(), false);
-        chip(g, mouseX, mouseY, cx + 82, oy + 66, 68, "Logo: " + WaypointsMod.markerSizeLabel(), false);
 
         // list
         if (all.isEmpty()) {
